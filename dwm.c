@@ -283,7 +283,7 @@ static void zoom(const Arg *arg);
 
 static void togglefullscreen(const Arg *arg);
 static void playerctl(const Arg *arg);
-static void debug_send_message(const DebugArg *arg);
+static void debug_send_message(char message[]);
 static void tile2(Monitor *m);
 static void fibonacci(Monitor *m);
 
@@ -764,13 +764,7 @@ void drawbar(Monitor *m) {
     return;
 
   /* draw status first so it can be overdrawn by tags later */
-  if (!0 || m == selmon) { /* status is only drawn on selected monitor FIX: on
-                              all monitors */
-    // drw_setscheme(drw, scheme[SchemeNorm]);
-    // tw = TEXTW(stext) - lrpad + 2; /* 2px right padding */
-    // drw_text(drw, m->ww - tw, 0, tw, bh, 0, stext, 0);
-    tw = statusw = m->ww - drawstatusbar(m, bh, stext);
-  }
+  tw = statusw = m->ww - drawstatusbar(m, bh, stext);
 
   for (c = m->clients; c; c = c->next) {
     occ |= c->tags == TAGMASK ? 0 : c->tags;
@@ -1198,7 +1192,7 @@ void movemouse(const Arg *arg) {
       handler[ev.type](&ev);
       break;
     case MotionNotify:
-      if ((ev.xmotion.time - lasttime) <= (1000 / 60))
+      if ((ev.xmotion.time - lasttime) <= (1000 / 240))
         continue;
       lasttime = ev.xmotion.time;
 
@@ -1659,6 +1653,7 @@ void spawn(const Arg *arg) {
   }
 }
 
+/* This ungodly contraption looks really ugly ngl. Maybe use sxhkd instead? */
 void playerctl(const Arg *arg) {
   if (arg->i == 1) {
     system("playerctl play-pause");
@@ -1676,38 +1671,13 @@ void playerctl(const Arg *arg) {
     system("pactl set-sink-mute @DEFAULT_SINK@ toggle");
   }
 
-  debug_send_message(
-      &(DebugArg){.type = DEBUG_TYPE_STRING, .data.s = "playerctl()"});
+  debug_send_message("playerctl()");
 }
 
-void debug_send_message(const DebugArg *arg) {
-  char message[256];
-
-  if (arg) {
-    switch (arg->type) {
-    case DEBUG_TYPE_STRING:
-      if (arg->data.s) {
-        snprintf(message, sizeof(message), "notify-send '%s'", arg->data.s);
-      } else {
-        snprintf(message, sizeof(message), "notify-send 'null string'");
-      }
-      break;
-    case DEBUG_TYPE_NUMBER:
-      snprintf(message, sizeof(message), "notify-send '%d'", arg->data.i);
-      break;
-    case DEBUG_TYPE_UNSIGNED:
-      snprintf(message, sizeof(message), "notify-send '%u'", arg->data.u);
-      break;
-    case DEBUG_TYPE_FLOAT:
-      snprintf(message, sizeof(message), "notify-send '%.2f'", arg->data.f);
-      break;
-    default:
-      snprintf(message, sizeof(message), "notify-send 'unknown type'");
-      break;
-    }
-    // Send the message, e.g., using system(message);
-    system(message);
-  }
+void debug_send_message(char message[]) {
+  char cmd[1024];
+  snprintf(cmd, sizeof(cmd), "notify-send \"%s\"", message);
+  system(cmd);
 }
 
 void tag(const Arg *arg) {
@@ -2089,21 +2059,11 @@ void updatesizehints(Client *c) {
   if (size.flags & PMaxSize) {
     c->maxw = size.max_width;
     c->maxh = size.max_height;
-    c->isfloating = c->isfloating || (c->maxw < c->mon->mw - (gappx * 2));
   } else
     c->maxw = c->maxh = 0;
-  if (size.flags & PMinSize) {
-    c->minw = 1;
-    c->minh = 1;
-    // c->minw = size.min_width;
-    // c->minh = size.min_height;
-  } else if (size.flags & PBaseSize) {
-    c->minw = 1;
-    c->minh = 1;
-    // c->minw = size.base_width;
-    // c->minh = size.base_height;
-  } else
-    c->minw = c->minh = 0;
+
+  /* We don't respect limitations here. Madge*/ 
+  c->minw = c->minh = 0;
   if (size.flags & PAspect) {
     c->mina = (float)size.min_aspect.y / size.min_aspect.x;
     c->maxa = (float)size.max_aspect.x / size.max_aspect.y;
