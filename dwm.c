@@ -63,17 +63,38 @@
 /* enums */
 enum { CurNormal, CurResize, CurMove, CurLast }; /* cursor */
 enum { SchemeNorm, SchemeSel };                  /* color schemes */
+// enum {
+//   NetSupported,
+//   NetWMName,
+//   NetWMState,
+//   NetWMCheck,
+//   NetWMFullscreen,
+//   NetActiveWindow,
+//   NetWMWindowType,
+//   NetWMWindowTypeDialog,
+//   NetClientList,
+//   NetLast
+// }; /* EWMH atoms */
 enum {
-  NetSupported,
-  NetWMName,
-  NetWMState,
-  NetWMCheck,
-  NetWMFullscreen,
-  NetActiveWindow,
-  NetWMWindowType,
-  NetWMWindowTypeDialog,
-  NetClientList,
-  NetLast
+	NetSupported,
+	NetWMName,
+	NetWMIcon,
+	NetWMState,
+	NetWMCheck,
+	NetSystemTray,
+	NetSystemTrayOP,
+	NetSystemTrayOrientation,
+	NetSystemTrayOrientationHorz, /* System tray */
+	NetWMFullscreen,
+	NetActiveWindow,
+	NetWMWindowType,
+	NetWMWindowTypeDialog,
+	NetWMSticky,
+	NetClientList,
+	NetWMDesktop,
+	NetCurrentDesktop,
+	NetCurrentMonCenter,
+	NetLast
 }; /* EWMH atoms */
 enum {
   WMProtocols,
@@ -282,7 +303,6 @@ static int xerrorstart(Display *dpy, XErrorEvent *ee);
 static void zoom(const Arg *arg);
 
 static void togglefullscreen(const Arg *arg);
-static void playerctl(const Arg *arg);
 static void debug_send_message(char message[]);
 static void tile2(Monitor *m);
 static void fibonacci(Monitor *m);
@@ -1572,6 +1592,7 @@ void setup(void) {
   netatom[NetWMWindowTypeDialog] =
       XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DIALOG", False);
   netatom[NetClientList] = XInternAtom(dpy, "_NET_CLIENT_LIST", False);
+  netatom[NetCurrentDesktop] = XInternAtom(dpy, "_NET_CURRENT_DESKTOP", False);
   /* init cursors */
   cursor[CurNormal] = drw_cur_create(drw, XC_left_ptr);
   cursor[CurResize] = drw_cur_create(drw, XC_sizing);
@@ -1651,27 +1672,6 @@ void spawn(const Arg *arg) {
     execvp(((char **)arg->v)[0], (char **)arg->v);
     die("dwm: execvp '%s' failed:", ((char **)arg->v)[0]);
   }
-}
-
-/* This ungodly contraption looks really ugly ngl. Maybe use sxhkd instead? */
-void playerctl(const Arg *arg) {
-  if (arg->i == 1) {
-    system("playerctl play-pause");
-  } else if (arg->i == 2) {
-    system("playerctl next");
-  } else if (arg->i == 3) {
-    system("playerctl previous");
-  } else if (arg->i == 4) {
-    system("playerctl stop");
-  } else if (arg->i == 5) {
-    system("pactl set-sink-volume @DEFAULT_SINK@ +10%");
-  } else if (arg->i == 6) {
-    system("pactl set-sink-volume @DEFAULT_SINK@ -10%");
-  } else if (arg->i == 7) {
-    system("pactl set-sink-mute @DEFAULT_SINK@ toggle");
-  }
-
-  debug_send_message("playerctl()");
 }
 
 void debug_send_message(char message[]) {
@@ -1932,6 +1932,12 @@ void updatebarpos(Monitor *m) {
     m->wy = m->topbar ? m->wy + bh : m->wy;
   } else
     m->by = -bh;
+}
+
+void updatecurrentdesktop(Monitor *m) {
+  long data[] = {(long)m->tagset[m->seltags]};
+  XChangeProperty(dpy, root, netatom[NetCurrentDesktop], XA_CARDINAL, 32,
+                  PropModeReplace, (unsigned char *)data, 1);
 }
 
 void updateclientlist(void) {

@@ -1,5 +1,7 @@
 /* See LICENSE file for copyright and license details. */
 
+#include <X11/XF86keysym.h>
+
 /* appearance */
 static const unsigned int borderpx  = 2;        /* border pixel of windows */
 static const unsigned int gappx     = 15; 
@@ -91,8 +93,6 @@ static const char *telegramcmd[]  = { "telegram-desktop", NULL };
 static const char *xcolorcmd[]  = { "sh", "-c", "notify-send \"$(xcolor)\"", NULL };
 static const char *overlaycmd[]  = { "overlay", NULL };
 
-#include <X11/XF86keysym.h>
-
 static const int swallowfloating    = 0;
 
 static const Key keys[] = {
@@ -110,15 +110,6 @@ static const Key keys[] = {
 	{ MODKEY,                       XK_e,      spawn,           {.v = filemanagercmd } },
 	{ MODKEY,                       XK_space,  spawn,           {.v = overlaycmd } },
 	{ ControlMask,                  XK_Print,  spawn,           {.v = xcolorcmd} },
- 
-	{ 0,	            XF86XK_AudioPlay,      playerctl,       {.i = 1 } },
-	{ 0,	            XF86XK_AudioNext,      playerctl,       {.i = 2 } },
-	{ 0,	            XF86XK_AudioPrev,      playerctl,       {.i = 3 } },
-	{ 0,	            XF86XK_AudioStop,      playerctl,       {.i = 4 } },
-
-	{ 0,	            XF86XK_AudioRaiseVolume,      playerctl,       {.i = 5 } },
-	{ 0,	            XF86XK_AudioLowerVolume,      playerctl,       {.i = 6 } },
-	{ 0,	            XF86XK_AudioMute,      playerctl,       {.i = 7 } },
  
 	{ MODKEY,                       XK_b,      togglebar,       {0} },
 	{ MODKEY,                       XK_h,      setmfact,        {.f = -0.05} },
