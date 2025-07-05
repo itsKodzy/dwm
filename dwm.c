@@ -99,23 +99,6 @@ typedef union {
   const void *v;
 } Arg;
 
-typedef enum {
-  DEBUG_TYPE_STRING,
-  DEBUG_TYPE_NUMBER,
-  DEBUG_TYPE_UNSIGNED,
-  DEBUG_TYPE_FLOAT
-} DebugType;
-
-typedef struct {
-  DebugType type;
-  union {
-    const char *s;
-    int i;
-    unsigned int u;
-    float f;
-  } data;
-} DebugArg;
-
 typedef struct {
   unsigned int click;
   unsigned int mask;
@@ -281,10 +264,19 @@ static int xerrordummy(Display *dpy, XErrorEvent *ee);
 static int xerrorstart(Display *dpy, XErrorEvent *ee);
 static void zoom(const Arg *arg);
 
+typedef enum {
+  TRIANGULATION_TOP,
+  TRIANGULATION_RIGHT,
+  TRIANGULATION_BOTTOM,
+  TRIANGULATION_LEFT
+} TriangulationSide;
+
 static void togglefullscreen(const Arg *arg);
 static void debug_send_message(char message[]);
-static void tile2(Monitor *m);
+static void dynamictile(Monitor *m);
 static void fibonacci(Monitor *m);
+static void _triangulatewindowwrapper(const Arg *arg);
+static TriangulationSide triangulatewindow(Client *c, int mx, int my);
 
 /* variables */
 static const char broken[] = "broken";
@@ -434,7 +426,6 @@ int applysizehints(Client *c, int *x, int *y, int *w, int *h, int interact) {
 
 void arrange(Monitor *m) {
   if (m) {
-    updatecurrentdesktop(m);
     showhide(m->stack);
   } else
     for (m = mons; m; m = m->next)
@@ -1703,7 +1694,76 @@ void tile(Monitor *m) {
     }
 }
 
-void tile2(Monitor *m) {
+void _triangulatewindowwrapper(const Arg *arg) {
+  Client *c;
+  int x, y;
+
+  if (!getrootptr(&x, &y)) {
+    debug_send_message("whoopsie");
+    return;
+  }
+
+  if (!(c = selmon->sel)) {
+    debug_send_message("Double whoopsie");
+    return;
+  }
+
+  triangulatewindow(c, x, y);
+}
+
+/*
+  This shit is taking so much longer than I could've anticipated.
+  Can't believe I'm that dumb ;_;
+  A freaking hour... It took me a freaking hour
+  to imagine the whole geometry. I really gotta get myself a graphic tablet. 
+*/
+TriangulationSide triangulatewindow(Client *c, int mx, int my) {
+  int x = (mx - c->x) * c->h;
+  int y = (my - c->y) * c->w;
+  char message[1024];
+
+  int is_above_main_diagonal = x > y;
+  int is_above_alt_diagonal = !(x > (c->h - (my - c->y)) * c->w);
+
+  snprintf(message, sizeof(message), "main: %d alt: %d", is_above_main_diagonal,
+           is_above_alt_diagonal);
+  debug_send_message(message);
+  snprintf(message, sizeof(message), "x: %d y: %d factor: %d", x, y);
+  debug_send_message(message);
+
+  if (is_above_main_diagonal && is_above_alt_diagonal) {
+    return TRIANGULATION_TOP;
+  } else if (is_above_main_diagonal && !is_above_alt_diagonal) {
+    return TRIANGULATION_RIGHT;
+  } else if (!is_above_main_diagonal && is_above_alt_diagonal) {
+    return TRIANGULATION_LEFT;
+  } else if (!is_above_alt_diagonal && !is_above_main_diagonal) {
+    return TRIANGULATION_BOTTOM;
+  } else {
+    debug_send_message("HOLY MOLY, we hit the second tower (an edge case. "
+                       "Please report it to Kodzy)");
+  }
+};
+
+/* a pathetic attempt to create a dynamic tiling like in hyprland. */
+/* Imagining process */
+/* We need to imagine a square if only one window is present [ ]
+   Then, when we spawn a new window, we divide this square in two rectangles [|]
+   and put the window to the area that mouse currently overlaps.
+
+   Now we have a problem with vertical placement.
+   Okay, we can divide the square by 4 [+] and then based on the cursor position
+   we can precisely put it horizontaly and vertically.
+
+   Now I have no idea how to even implement this.
+   So, clients (n) == rectangles.
+
+   Or, we can imagine the dividers, which kind of is the same as using the
+   rectangles. Or maybe we don't even need any divi
+*/
+void dynamictile(Monitor *m) {
+  fibonacci(m);
+  return;
   int x, y;
   unsigned int i, n, h, mw, my, ty;
   my = ty = m->gappx;
@@ -1717,15 +1777,14 @@ void tile2(Monitor *m) {
   if (n == 0)
     return;
 
-  mw = m->ww - m->gappx;
-  for (i = 0, my = ty = m->gappx, c = nexttiled(m->clients); c;
-       c = nexttiled(c->next), i++) {
-    h = (m->wh - ty) / (n - i) - m->gappx;
-    resize(c, m->wx + mw + m->gappx, m->wy + ty,
-           m->ww - mw - (2 * c->bw) - 2 * m->gappx, h - (2 * c->bw), 0);
-    if (ty + HEIGHT(c) + m->gappx < m->wh)
-      ty += HEIGHT(c) + m->gappx;
-  }
+  /*
+    Now we can use triangulation to determine the division place.
+    And I still gotta figure out how the heck am I even supposed to store
+    the whole layout data.
+    First if layout data is not stored fully we need to generate a basic layout
+    and fill the layout data. Then we can be sure that layout is managed by us.
+    Not really reliable, but it is what it is.
+  */
 }
 
 void fibonacci(Monitor *m) {
@@ -1748,6 +1807,7 @@ void fibonacci(Monitor *m) {
 
   for (i = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next)) {
     if ((i % 2 && nh / 2 > 2 * c->bw) || (!(i % 2) && nw / 2 > 2 * c->bw)) {
+
       if (i < n - 1) {
         if (i % 2)
           nh /= 2;
@@ -1758,6 +1818,7 @@ void fibonacci(Monitor *m) {
         else if ((i % 4) == 3 && !s)
           ny += nh;
       }
+
       if ((i % 4) == 0) {
         if (s)
           ny += nh;
@@ -1773,6 +1834,7 @@ void fibonacci(Monitor *m) {
         else
           nx -= nw;
       }
+
       if (i == 0) {
         if (n != 1)
           nw = m->ww * m->mfact;
@@ -2042,7 +2104,7 @@ void updatesizehints(Client *c) {
   } else
     c->maxw = c->maxh = 0;
 
-  /* We don't respect limitations here. Madge*/ 
+  /* We don't respect limitations here. Madge*/
   c->minw = c->minh = 0;
   if (size.flags & PAspect) {
     c->mina = (float)size.min_aspect.y / size.min_aspect.x;

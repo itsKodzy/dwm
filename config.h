@@ -61,7 +61,7 @@ static const Layout layouts[] = {
 	{ "[@]",      fibonacci },
 	{ "[M]",      monocle },
 	{ "[]=",      tile },    /* first entry is default */
-	{ "PENIS",      tile2 },    /* first entry is default */
+	{ "PENIS",      dynamictile },    /* first entry is default */
 	{ "><>",      NULL },    /* no layout function means floating behavior */
 };
 
@@ -139,6 +139,7 @@ static const Button buttons[] = {
 	/* click                event mask      button          function        argument */
 	{ ClkLtSymbol,          0,              Button1,        setlayout,      {0} },
 	{ ClkLtSymbol,          0,              Button3,        setlayout,      {.v = &layouts[2]} },
+	{ ClkClientWin,         MODKEY|Mod1Mask,Button1,        _triangulatewindowwrapper,      {0} },
 	{ ClkClientWin,         MODKEY,         Button1,        movemouse,      {0} },
 	{ ClkClientWin,         MODKEY,         Button2,        togglefloating, {0} },
 	{ ClkClientWin,         MODKEY,         Button3,        resizemouse,    {0} },
