@@ -53,6 +53,9 @@
 #define INTERSECT(x, y, w, h, m)                                               \
   (MAX(0, MIN((x) + (w), (m)->wx + (m)->ww) - MAX((x), (m)->wx)) *             \
    MAX(0, MIN((y) + (h), (m)->wy + (m)->wh) - MAX((y), (m)->wy)))
+
+#define INTERSECTPOINT(x, y, w, h, px, py)                                     \
+  ((px) >= (x) && (py) >= (y) && (px) < (x) + (w) && (py) < (y) + (h))
 #define ISVISIBLE(C) ((C->tags & C->mon->tagset[C->mon->seltags]))
 #define MOUSEMASK (BUTTONMASK | PointerMotionMask)
 #define WIDTH(X) ((X)->w + 2 * (X)->bw)
@@ -204,7 +207,6 @@ static pid_t getstatusbarpid();
 static int gettextprop(Window w, Atom atom, char *text, unsigned int size);
 static void grabbuttons(Client *c, int focused);
 static void grabkeys(void);
-static void incnmaster(const Arg *arg);
 static void keypress(XEvent *e);
 static void killclient(const Arg *arg);
 static void manage(Window w, XWindowAttributes *wa);
@@ -271,12 +273,29 @@ typedef enum {
   TRIANGULATION_LEFT
 } TriangulationSide;
 
+typedef struct TileNode {
+  int x, y, w, h;
+  int hsplit; // 1 if horizontal split, 0 if vertical;
+  float fact;
+  struct TileNode *parent;
+  struct TileNode *childleft;
+  struct TileNode *childright;
+
+  Client *client; // Only set in the leaf nodes
+
+} TileNode;
+
 static void togglefullscreen(const Arg *arg);
 static void debug_send_message(char message[]);
 static void dynamictile(Monitor *m);
 static void fibonacci(Monitor *m);
 static void _triangulatewindowwrapper(const Arg *arg);
-static TriangulationSide triangulatewindow(Client *c, int mx, int my);
+static TriangulationSide triangulate(int wx, int wy, int ww, int wh, int mx,
+                                     int my);
+static void addtilenode(Client *client);
+static TileNode *findclientintree(TileNode *node, Client *client);
+static TileNode *recursivetilefinder(TileNode *node, int x, int y);
+static void recursiveresize(TileNode *node);
 
 /* variables */
 static const char broken[] = "broken";
@@ -999,11 +1018,6 @@ void grabkeys(void) {
   }
 }
 
-void incnmaster(const Arg *arg) {
-  selmon->nmaster = MAX(selmon->nmaster + arg->i, 0);
-  arrange(selmon);
-}
-
 #ifdef XINERAMA
 static int isuniquegeom(XineramaScreenInfo *unique, size_t n,
                         XineramaScreenInfo *info) {
@@ -1101,6 +1115,10 @@ void manage(Window w, XWindowAttributes *wa) {
   if (c->mon == selmon)
     unfocus(selmon->sel, 0);
   c->mon->sel = c;
+
+  if (strcmp(c->mon->ltsymbol, "[P]") == 0)
+    addtilenode(c);
+
   arrange(c->mon);
   XMapWindow(dpy, c->win);
   focus(NULL);
@@ -1708,22 +1726,16 @@ void _triangulatewindowwrapper(const Arg *arg) {
     return;
   }
 
-  triangulatewindow(c, x, y);
+  triangulate(c->x, c->y, c->w, c->h, x, y);
 }
 
-/*
-  This shit is taking so much longer than I could've anticipated.
-  Can't believe I'm that dumb ;_;
-  A freaking hour... It took me a freaking hour
-  to imagine the whole geometry. I really gotta get myself a graphic tablet.
-*/
-TriangulationSide triangulatewindow(Client *c, int mx, int my) {
-  int x = (mx - c->x) * c->h;
-  int y = (my - c->y) * c->w;
-  char message[1024];
+TriangulationSide triangulate(int wx, int wy, int ww, int wh, int mx, int my) {
+  int x = (mx - wx) * wh;
+  int y = (my - wy) * ww;
+  char message[32];
 
   int is_above_main_diagonal = x > y;
-  int is_above_alt_diagonal = !(x > (c->h - (my - c->y)) * c->w);
+  int is_above_alt_diagonal = !(x > (wh - (my - wy)) * ww);
 
   snprintf(message, sizeof(message), "main: %d alt: %d", is_above_main_diagonal,
            is_above_alt_diagonal);
@@ -1746,40 +1758,203 @@ TriangulationSide triangulatewindow(Client *c, int mx, int my) {
   }
 };
 
-/* a pathetic attempt to create a dynamic tiling like in hyprland. */
-/* Imagining process */
-/* We need to imagine a square if only one window is present [ ]
-   Then, when we spawn a new window, we divide this square in two rectangles [|]
-   and put the window to the area that mouse currently overlaps.
-
-   Now we have a problem with vertical placement.
-   Okay, we can divide the square by 4 [+] and then based on the cursor position
-   we can precisely put it horizontaly and vertically.
-
-   Now I have no idea how to even implement this.
-   So, clients (n) == rectangles.
-
-   Or, we can imagine the dividers, which kind of is the same as using the
-   rectangles. Or maybe we don't even need any divi
+/*
+  This is becoming a literal comment hell =(
+  So, we can use a tree structure to accurately find neighboring nodes.
+  This way, performance would be a hell of a lot better than recalculating
+  everything.
+  Which is better, using trees to represent splits or window areas?
+  Let's go with splits for now, because we can just store split
+  orientation and the arbitrary factor/ratio.
+  Oh, and we can store window areas as leafs.
 */
 
-typedef struct {
-  int x;
-  int y;
-  int w;
-  int h;
-  /*
-  DynamicLayoutTile[] neighbors; ???
-  */
-} DynamicLayoutTile;
+TileNode *supercringelayout = NULL;
 
-DynamicLayoutTile dynamictiles[30];
-int dynamictilescount = 0;
+/*
+  TODO: Update child geometry if parent is a branch.
+*/
+void removetilenode(Client *client) {
+  if (!supercringelayout) {
+    debug_send_message(
+        "maaaan, this sucks. It was not supposed to be shown to u ;(");
+    return;
+  }
+
+  TileNode *node = findclientintree(supercringelayout, client);
+  if (!node) {
+    debug_send_message("oof, that's really not good");
+    return;
+  }
+
+  /* This node is a root leaf, which means we can safely free it */
+  if (!node->parent) {
+    free(node);
+    supercringelayout = NULL;
+    return;
+  }
+  TileNode *parentnode = node->parent;
+
+  TileNode *survivor;
+
+  if (parentnode->childleft->client == client) {
+    survivor = parentnode->childright;
+    free(parentnode->childleft);
+  } else {
+    survivor = parentnode->childleft;
+    free(parentnode->childright);
+  }
+
+  survivor->x = parentnode->x;
+  survivor->y = parentnode->y;
+  survivor->w = parentnode->w;
+  survivor->h = parentnode->h;
+  survivor->parent = NULL;
+
+  /* parentnode is a branch and a root node */
+  if (!parentnode->parent) {
+    free(parentnode);
+    supercringelayout = survivor;
+    return;
+  }
+
+  survivor->parent = parentnode->parent;
+  TileNode *grandparent = parentnode->parent;
+  if (grandparent->childleft == parentnode) {
+    grandparent->childleft = survivor;
+  } else {
+    grandparent->childright = survivor;
+  }
+
+  free(parentnode);
+}
+
+TileNode *findclientintree(TileNode *node, Client *client) {
+  if (node->client) {
+    if (node->client == client)
+      return node;
+    return NULL;
+  }
+
+  TileNode *res = findclientintree(node->childleft, client);
+  if (res)
+    return res;
+  return findclientintree(node->childright, client);
+}
+
+void addtilenode(Client *client) {
+  int n;
+  int x, y;
+  Client *c;
+  for (n = 0, c = nexttiled(client->mon->clients); c;
+       c = nexttiled(c->next), n++)
+    ;
+  if (n == 0)
+    return;
+
+  if (n == 1) {
+    if (!supercringelayout) {
+      supercringelayout = malloc(sizeof(TileNode));
+      supercringelayout->client = client;
+      supercringelayout->fact = 0.5f;
+      supercringelayout->x = client->mon->wx;
+      supercringelayout->y = client->mon->wy;
+      supercringelayout->w = client->mon->ww;
+      supercringelayout->h = client->mon->wh;
+      supercringelayout->childleft = NULL;
+      supercringelayout->childright = NULL;
+    }
+
+    return;
+  }
+
+  if (!getrootptr(&x, &y))
+    return;
+
+  TileNode *node = recursivetilefinder(supercringelayout, x, y);
+
+  if (!node) {
+    debug_send_message("wtf ;_;");
+    return;
+  }
+  TriangulationSide where =
+      triangulate(node->x, node->y, node->w, node->h, x, y);
+
+  TileNode *shiftnode = malloc(sizeof(TileNode));
+  TileNode *newnode = malloc(sizeof(TileNode));
+
+  shiftnode->fact = newnode->fact = 0.5, shiftnode->client = node->client,
+  shiftnode->x = newnode->x = node->x, shiftnode->y = newnode->y = node->y,
+  shiftnode->w = newnode->w = node->w, shiftnode->h = newnode->h = node->h;
+  shiftnode->childleft = shiftnode->childright = newnode->childleft =
+      newnode->childright = NULL;
+  newnode->client = client;
+
+  shiftnode->parent = newnode->parent = node;
+
+  node->client = NULL;
+
+  if (where == TRIANGULATION_BOTTOM) {
+    node->hsplit = 0;
+    shiftnode->h *= node->fact;
+    newnode->h *= 1.f - node->fact;
+    newnode->y += shiftnode->h;
+  } else if (where == TRIANGULATION_LEFT) {
+    node->hsplit = 1;
+    shiftnode->w *= 1.f - node->fact;
+    newnode->w *= node->fact;
+    shiftnode->x += newnode->w;
+  } else if (where == TRIANGULATION_RIGHT) {
+    node->hsplit = 1;
+    shiftnode->w *= node->fact;
+    newnode->w *= 1.f - node->fact;
+    newnode->x += shiftnode->w;
+  } else if (where == TRIANGULATION_TOP) {
+    node->hsplit = 0;
+    shiftnode->h *= 1.f - node->fact;
+    newnode->h *= node->fact;
+    shiftnode->y += newnode->h;
+  }
+
+  if (where == TRIANGULATION_BOTTOM || where == TRIANGULATION_RIGHT) {
+    node->childleft = shiftnode;
+    node->childright = newnode;
+  } else {
+    node->childright = shiftnode;
+    node->childleft = newnode;
+  }
+}
+
+/*
+  Recursion sucks.
+  Should rewrite it iteratively. Later. Maybe.
+*/
+TileNode *recursivetilefinder(TileNode *node, int mx, int my) {
+  if (node->client) {
+    if (INTERSECTPOINT(node->x, node->y, node->w, node->h, mx, my))
+      return node;
+
+    return NULL;
+  }
+
+  if (node->hsplit) {
+    int _w = node->w * node->fact;
+    if (mx >= node->x && mx < node->x + _w) {
+      return recursivetilefinder(node->childleft, mx, my);
+    } else {
+      return recursivetilefinder(node->childright, mx, my);
+    }
+  } else {
+    int _h = node->h * node->fact;
+    if (my >= node->y && my < node->y + _h) {
+      return recursivetilefinder(node->childleft, mx, my);
+    } else {
+      return recursivetilefinder(node->childright, mx, my);
+    }
+  }
+}
 
 void dynamictile(Monitor *m) {
-  // Don't forget to remove this when you are going to test this tiling.
-  fibonacci(m);
-  return;
   int x, y;
   unsigned int i, n, h, mw, my, ty, nx, ny;
   my = ty = m->gappx;
@@ -1787,80 +1962,50 @@ void dynamictile(Monitor *m) {
   int is_arranged = 0;
 
   if (!getrootptr(&x, &y))
-    fibonacci(m);
+    return;
 
   for (n = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), n++)
     ;
   if (n == 0)
     return;
 
-  if (dynamictilescount != n) {
-    for (i = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), i++) {
-      dynamictiles[i] = (DynamicLayoutTile){
-          .x = c->x,
-          .y = c->y,
-          .w = c->w,
-          .h = c->h,
-      };
-    }
+  if (!supercringelayout) {
+    supercringelayout = malloc(sizeof(TileNode));
+    supercringelayout->fact = 0.5f;
+    supercringelayout->x = selmon->wx;
+    supercringelayout->y = selmon->wy;
+    supercringelayout->w = selmon->ww;
+    supercringelayout->h = selmon->wh;
+    supercringelayout->childleft = NULL;
+    supercringelayout->childright = NULL;
+  }
+
+  if (n == 1) {
+    supercringelayout->client = nexttiled(m->clients);
+    recursiveresize(supercringelayout);
+    return;
   }
 
   /*
-    Now we can use triangulation to determine the division place.
-    And I still gotta figure out how the heck am I even supposed to store
-    the whole layout data.
-    First if layout data is not stored fully we need to generate a basic layout
-    and fill the layout data. Then we can be sure that layout is managed by us.
-    Not really reliable, but it is what it is.
+    It should be working now. Should just add reinitialization if we our layout
+    is wrong.
   */
+  // int alternating = 0;
+  // for (i = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next)) {
 
-  /*
-    It is possible to just use relative window geometry to determine its
-    position in the layout, but I'm afraid it's not going to work really well.
-  */
+  // }
 
-  for (i = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), i++) {
-    if (n == 1) {
-      nx = m->wx;
-      ny = m->wy;
-      resize(c, nx, ny, m->ww, m->wh, 0);
-    }
+  recursiveresize(supercringelayout);
+}
 
-    /* 
-      Client that was just spawned and not yet managed (I hope) 
-      Should also be used for moved clients (not yet)
-    */
-    if (c->w == m->wh && c->h == m->wh && c->x == m->wx && c->y == m->wy) {
-      /*
-        Get a client below the cursor and triangulate it
-        Actually, I think it would be better to get an underlying dynamic tile
-      */
-      // target client
-      Client *tc;
-
-      TriangulationSide where = triangulatewindow(tc, x, y);
-
-      /*
-        Could also just de-branch this by returning an int instead of enum
-        Currently it's ugly, but easy to code, so let's stick to that.
-
-        int _h = tc->h / 2;
-        int _w = tc->w / 2;
-        resize(tc, tc->x + (_h * where << 1 & 1) + ...) like that.
-
-        Performance impact is negligible, but readability is much worse.
-      */
-      if (where == TRIANGULATION_BOTTOM) {
-        resize(tc, tc->x, tc->y, tc->w, tc->h / 2, 0);
-      } else if (where == TRIANGULATION_LEFT) {
-        resize(tc, tc->x + tc->w / 2, tc->y, tc->w / 2, tc->h, 0);
-      } else if (where == TRIANGULATION_RIGHT) {
-        resize(tc, tc->x, tc->y, tc->w / 2, tc->h, 0);
-      } else if (where == TRIANGULATION_TOP) {
-        resize(tc, tc->x + tc->h / 2, tc->y, tc->w, tc->h / 2, 0);
-      }
-    }
+void recursiveresize(TileNode *node) {
+  if (node->client) {
+    resize(node->client, node->x, node->y, node->w, node->h, 0);
+    return;
   }
+
+  recursiveresize(node->childleft);
+  recursiveresize(node->childright);
 }
 
 void fibonacci(Monitor *m) {
@@ -1939,9 +2084,17 @@ void togglefloating(const Arg *arg) {
   if (selmon->sel->isfullscreen) /* no support for fullscreen windows */
     return;
   selmon->sel->isfloating = !selmon->sel->isfloating || selmon->sel->isfixed;
-  if (selmon->sel->isfloating)
+  if (selmon->sel->isfloating) {
     resize(selmon->sel, selmon->sel->x, selmon->sel->y, selmon->sel->w,
            selmon->sel->h, 0);
+
+    if (strcmp(selmon->ltsymbol, "[P]") == 0)
+      removetilenode(selmon->sel);
+  } else {
+    if (strcmp(selmon->ltsymbol, "[P]") == 0)
+      addtilenode(selmon->sel);
+  }
+
   arrange(selmon);
 }
 
@@ -2004,6 +2157,10 @@ void unmanage(Client *c, int destroyed) {
     XSetErrorHandler(xerror);
     XUngrabServer(dpy);
   }
+
+  if (strcmp(c->mon->ltsymbol, "[P]") == 0)
+    removetilenode(c);
+
   free(c);
   arrange(m);
   focus(NULL);
@@ -2182,7 +2339,7 @@ void updatesizehints(Client *c) {
 
   /* Don't respect minimum geometry + make window floating if max size cannot
    * fill the entire screen */
-  c->isfloating = c->isfloating || (c->maxw < c->mon->mw - (gappx * 2));
+  // c->isfloating = c->isfloating || (c->maxw < c->mon->mw - (gappx * 2));
   c->minw = c->minh = 0;
 
   if (size.flags & PAspect) {
