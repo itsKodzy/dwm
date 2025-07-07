@@ -1715,7 +1715,7 @@ void _triangulatewindowwrapper(const Arg *arg) {
   This shit is taking so much longer than I could've anticipated.
   Can't believe I'm that dumb ;_;
   A freaking hour... It took me a freaking hour
-  to imagine the whole geometry. I really gotta get myself a graphic tablet. 
+  to imagine the whole geometry. I really gotta get myself a graphic tablet.
 */
 TriangulationSide triangulatewindow(Client *c, int mx, int my) {
   int x = (mx - c->x) * c->h;
@@ -1742,6 +1742,7 @@ TriangulationSide triangulatewindow(Client *c, int mx, int my) {
   } else {
     debug_send_message("HOLY MOLY, we hit the second tower (an edge case. "
                        "Please report it to Kodzy)");
+    return TRIANGULATION_TOP;
   }
 };
 
@@ -1761,13 +1762,29 @@ TriangulationSide triangulatewindow(Client *c, int mx, int my) {
    Or, we can imagine the dividers, which kind of is the same as using the
    rectangles. Or maybe we don't even need any divi
 */
+
+typedef struct {
+  int x;
+  int y;
+  int w;
+  int h;
+  /*
+  DynamicLayoutTile[] neighbors; ???
+  */
+} DynamicLayoutTile;
+
+DynamicLayoutTile dynamictiles[30];
+int dynamictilescount = 0;
+
 void dynamictile(Monitor *m) {
+  // Don't forget to remove this when you are going to test this tiling.
   fibonacci(m);
   return;
   int x, y;
-  unsigned int i, n, h, mw, my, ty;
+  unsigned int i, n, h, mw, my, ty, nx, ny;
   my = ty = m->gappx;
   Client *c;
+  int is_arranged = 0;
 
   if (!getrootptr(&x, &y))
     fibonacci(m);
@@ -1777,6 +1794,17 @@ void dynamictile(Monitor *m) {
   if (n == 0)
     return;
 
+  if (dynamictilescount != n) {
+    for (i = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), i++) {
+      dynamictiles[i] = (DynamicLayoutTile){
+          .x = c->x,
+          .y = c->y,
+          .w = c->w,
+          .h = c->h,
+      };
+    }
+  }
+
   /*
     Now we can use triangulation to determine the division place.
     And I still gotta figure out how the heck am I even supposed to store
@@ -1785,6 +1813,54 @@ void dynamictile(Monitor *m) {
     and fill the layout data. Then we can be sure that layout is managed by us.
     Not really reliable, but it is what it is.
   */
+
+  /*
+    It is possible to just use relative window geometry to determine its
+    position in the layout, but I'm afraid it's not going to work really well.
+  */
+
+  for (i = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), i++) {
+    if (n == 1) {
+      nx = m->wx;
+      ny = m->wy;
+      resize(c, nx, ny, m->ww, m->wh, 0);
+    }
+
+    /* 
+      Client that was just spawned and not yet managed (I hope) 
+      Should also be used for moved clients (not yet)
+    */
+    if (c->w == m->wh && c->h == m->wh && c->x == m->wx && c->y == m->wy) {
+      /*
+        Get a client below the cursor and triangulate it
+        Actually, I think it would be better to get an underlying dynamic tile
+      */
+      // target client
+      Client *tc;
+
+      TriangulationSide where = triangulatewindow(tc, x, y);
+
+      /*
+        Could also just de-branch this by returning an int instead of enum
+        Currently it's ugly, but easy to code, so let's stick to that.
+
+        int _h = tc->h / 2;
+        int _w = tc->w / 2;
+        resize(tc, tc->x + (_h * where << 1 & 1) + ...) like that.
+
+        Performance impact is negligible, but readability is much worse.
+      */
+      if (where == TRIANGULATION_BOTTOM) {
+        resize(tc, tc->x, tc->y, tc->w, tc->h / 2, 0);
+      } else if (where == TRIANGULATION_LEFT) {
+        resize(tc, tc->x + tc->w / 2, tc->y, tc->w / 2, tc->h, 0);
+      } else if (where == TRIANGULATION_RIGHT) {
+        resize(tc, tc->x, tc->y, tc->w / 2, tc->h, 0);
+      } else if (where == TRIANGULATION_TOP) {
+        resize(tc, tc->x + tc->h / 2, tc->y, tc->w, tc->h / 2, 0);
+      }
+    }
+  }
 }
 
 void fibonacci(Monitor *m) {
@@ -2104,8 +2180,11 @@ void updatesizehints(Client *c) {
   } else
     c->maxw = c->maxh = 0;
 
-  /* We don't respect limitations here. Madge*/
+  /* Don't respect minimum geometry + make window floating if max size cannot
+   * fill the entire screen */
+  c->isfloating = c->isfloating || (c->maxw < c->mon->mw - (gappx * 2));
   c->minw = c->minh = 0;
+
   if (size.flags & PAspect) {
     c->mina = (float)size.min_aspect.y / size.min_aspect.x;
     c->maxa = (float)size.max_aspect.x / size.max_aspect.y;

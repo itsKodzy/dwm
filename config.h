@@ -8,11 +8,6 @@ static const unsigned int bargapy   = 0;
 static const unsigned int snap      = 32;       /* snap pixel */
 static const int showbar            = 1;        /* 0 means no bar */
 static const int topbar             = 1;        /* 0 means bottom bar */
-// static const char *fonts[]          = { "JetBrainsMonoNL NFP:size=10:style=Bold", "NotoColorEmoji:pixelsize=10:antialias=true:autohint=true" };
-// static const char col_gray1[]       = "#222222";
-// static const char col_gray2[]       = "#444444";
-// static const char col_gray3[]       = "#bbbbbb";
-// static const char col_gray4[]       = "#eeeeee";
 static const char *fonts[]          = { "Fixedsys Excelsior:size=12:antialias=true:autohint=false", "JetBrainsMonoNL NFP:size=10:style=Bold", "NotoColorEmoji:pixelsize=10:antialias=true:autohint=true" };
 static const char col_gray1[]       = "#d3d7cf";
 static const char col_gray2[]       = "#d3d7cf";
@@ -24,8 +19,6 @@ static const char col_white[]        = "#ffffff";
 
 static const char *colors[][3]      = {
 	/*               fg         bg         border   */
-	// [SchemeNorm] = { col_gray3, col_gray1, col_white },
-	// [SchemeSel]  = { col_gray4, col_red,  col_red  },
 	[SchemeNorm] = { col_gray3, col_gray1, col_cyan },
 	[SchemeSel]  = { col_gray4, col_cyan,  col_gray2  },
 };
@@ -78,16 +71,13 @@ static const Layout layouts[] = {
 #define STATUSBAR "dwmblocks"
 
 /* commands */
-static char dmenumon[2] = "0"; /* component of dmenucmd, manipulated in spawn() */
 static const char *termcmd[]  = { "alacritty", NULL };
 static const char *editorcmd[]  = { "code", NULL };
 static const char *flameshotcmd[]  = { "flameshot", "gui", NULL };
-static const char *filemanagercmd[]  = { "dolphin", NULL };
+static const char *filemgrcmd[]  = { "dolphin", NULL };
 
 static const char *roficmd[]  = { "rofi", "-show", "drun", NULL };
 static const char *clipboardcmd[]  = { "rofi", "-modi", "\"clipboard:greenclip print\"", "-show", "clipboard", NULL };
-static const char *spotifycmd[]  = { "spotify", NULL };
-static const char *telegramcmd[]  = { "telegram-desktop", NULL };
 static const char *xcolorcmd[]  = { "sh", "-c", "notify-send \"$(xcolor)\"", NULL };
 static const char *overlaycmd[]  = { "overlay", NULL };
 
@@ -105,7 +95,7 @@ static const Key keys[] = {
 	{ MODKEY,                       XK_v,      spawn,           {.v = clipboardcmd } },
 	{ MODKEY,                       XK_c,      spawn,           {.v = editorcmd } },
 	{ MODKEY,                       XK_t,      spawn,           {.v = termcmd } },
-	{ MODKEY,                       XK_e,      spawn,           {.v = filemanagercmd } },
+	{ MODKEY,                       XK_e,      spawn,           {.v = filemgrcmd } },
 	{ MODKEY,                       XK_space,  spawn,           {.v = overlaycmd } },
 	{ ControlMask,                  XK_Print,  spawn,           {.v = xcolorcmd} },
  
