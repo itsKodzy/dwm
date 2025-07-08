@@ -296,6 +296,7 @@ static void addtilenode(Client *client);
 static TileNode *findclientintree(TileNode *node, Client *client);
 static TileNode *recursivetilefinder(TileNode *node, int x, int y);
 static void recursiveresize(TileNode *node);
+static void updatechild(TileNode *node);
 
 /* variables */
 static const char broken[] = "broken";
@@ -1810,8 +1811,8 @@ void removetilenode(Client *client) {
   survivor->w = parentnode->w;
   survivor->h = parentnode->h;
   survivor->parent = NULL;
+  updatechild(survivor);
 
-  /* parentnode is a branch and a root node */
   if (!parentnode->parent) {
     free(parentnode);
     supercringelayout = survivor;
@@ -1827,6 +1828,37 @@ void removetilenode(Client *client) {
   }
 
   free(parentnode);
+}
+
+void updatechild(TileNode *node) {
+  if (node->client)
+    return;
+  int lw = node->w;
+  int lh = node->h;
+
+  if (node->hsplit) {
+    lw = node->w * node->fact;
+  } else {
+    lh = node->h * node->fact;
+  }
+
+  node->childleft->x = node->x;
+  node->childleft->y = node->y;
+  node->childleft->w = lw;
+  node->childleft->h = lh;
+
+  if (node->hsplit) {
+    node->childright->w = node->w - lw;
+    node->childright->x = node->x + node->childleft->w;
+    node->childright->y = node->y;
+  } else {
+    node->childright->y = node->y + node->childleft->h;
+    node->childright->x = node->x;
+    node->childright->h = node->h - lh;
+  }
+
+  updatechild(node->childleft);
+  updatechild(node->childright);
 }
 
 TileNode *findclientintree(TileNode *node, Client *client) {
@@ -2339,7 +2371,7 @@ void updatesizehints(Client *c) {
 
   /* Don't respect minimum geometry + make window floating if max size cannot
    * fill the entire screen */
-  // c->isfloating = c->isfloating || (c->maxw < c->mon->mw - (gappx * 2));
+  c->isfloating = (size.flags & PMaxSize) && c->maxw < c->mon->mw;
   c->minw = c->minh = 0;
 
   if (size.flags & PAspect) {
