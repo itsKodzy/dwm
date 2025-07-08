@@ -294,7 +294,7 @@ static TriangulationSide triangulate(int wx, int wy, int ww, int wh, int mx,
                                      int my);
 static void addtilenode(Client *client);
 static TileNode *findclientintree(TileNode *node, Client *client);
-static TileNode *recursivetilefinder(TileNode *node, int x, int y);
+static TileNode *findtile(TileNode *node, int x, int y);
 static void recursiveresize(TileNode *node);
 static void updatechild(TileNode *node);
 
@@ -1778,17 +1778,6 @@ TriangulationSide triangulate(int wx, int wy, int ww, int wh, int mx, int my) {
 }
 
 /*
-  This is becoming a literal comment hell =(
-  So, we can use a tree structure to accurately find neighboring nodes.
-  This way, performance would be a hell of a lot better than recalculating
-  everything.
-  Which is better, using trees to represent splits or window areas?
-  Let's go with splits for now, because we can just store split
-  orientation and the arbitrary factor/ratio.
-  Oh, and we can store window areas as leafs.
-*/
-
-/*
   TODO: Update child geometry if parent is a branch.
 */
 void removetilenode(Client *client) {
@@ -1920,7 +1909,7 @@ void addtilenode(Client *client) {
   if (!getrootptr(&x, &y))
     return;
 
-  TileNode *node = recursivetilefinder(dynamiclttree, x, y);
+  TileNode *node = findtile(dynamiclttree, x, y);
 
   if (!node) {
     debug_send_message(
@@ -1975,31 +1964,31 @@ void addtilenode(Client *client) {
   }
 }
 
-/*
-  Recursion sucks.
-  Should rewrite it iteratively. Later. Maybe.
-*/
-TileNode *recursivetilefinder(TileNode *node, int mx, int my) {
-  if (node->client) {
-    if (INTERSECTPOINT(node->x, node->y, node->w, node->h, mx, my))
-      return node;
+TileNode *findtile(TileNode *node, int mx, int my) {
+  TileNode *_node = node;
 
-    return NULL;
-  }
-
-  if (node->hsplit) {
-    int _w = node->w * node->fact;
-    if (mx >= node->x && mx < node->x + _w) {
-      return recursivetilefinder(node->childleft, mx, my);
-    } else {
-      return recursivetilefinder(node->childright, mx, my);
+  while (_node) {
+    if (_node->client) {
+      if (INTERSECTPOINT(_node->x, _node->y, _node->w, _node->h, mx, my))
+        return _node;
+      return NULL;
     }
-  } else {
-    int _h = node->h * node->fact;
-    if (my >= node->y && my < node->y + _h) {
-      return recursivetilefinder(node->childleft, mx, my);
+
+    int pos, min, max;
+    if (_node->hsplit) {
+      pos = mx;
+      min = _node->x;
+      max = min + _node->w * _node->fact;
     } else {
-      return recursivetilefinder(node->childright, mx, my);
+      pos = my;
+      min = _node->y;
+      max = min + _node->h * _node->fact;
+    }
+
+    if (pos >= min && pos < max) {
+      _node = _node->childleft;
+    } else {
+      _node = _node->childright;
     }
   }
 }
