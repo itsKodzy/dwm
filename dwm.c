@@ -139,6 +139,7 @@ typedef struct {
   void (*arrange)(Monitor *);
 } Layout;
 
+typedef struct Pertag Pertag;
 struct Monitor {
   char ltsymbol[16];
   float mfact;
@@ -159,6 +160,7 @@ struct Monitor {
   Monitor *next;
   Window barwin;
   const Layout *lt[2];
+  Pertag *pertag;
 };
 
 typedef struct {
@@ -298,8 +300,6 @@ static TileNode *findtile(TileNode *node, int x, int y);
 static void recursiveresize(TileNode *node);
 static void updatechild(TileNode *node);
 
-TileNode *dynamiclttree;
-
 /* variables */
 static const char broken[] = "broken";
 static char stext[1024];
@@ -338,6 +338,17 @@ static Window root, wmcheckwin;
 
 /* configuration, allows nested code to access above variables */
 #include "config.h"
+
+struct Pertag {
+  unsigned int curtag, prevtag;          /* current and previous tag */
+  int nmasters[LENGTH(tags) + 1];        /* number of windows in master area */
+  float mfacts[LENGTH(tags) + 1];        /* mfacts per tag */
+  unsigned int sellts[LENGTH(tags) + 1]; /* selected layouts */
+  const Layout
+      *ltidxs[LENGTH(tags) + 1][2]; /* matrix of tags and layouts indexes  */
+  int showbars[LENGTH(tags) + 1];   /* display bar for the current tag */
+  TileNode *dynamiclttree[LENGTH(tags) + 1];
+};
 
 /* compile-time check if all tags fit into an unsigned int bit array. */
 struct NumTags {
@@ -707,6 +718,7 @@ void configurerequest(XEvent *e) {
 
 Monitor *createmon(void) {
   Monitor *m;
+  unsigned int i;
 
   m = ecalloc(1, sizeof(Monitor));
   m->tagset[0] = m->tagset[1] = 1;
@@ -718,6 +730,20 @@ Monitor *createmon(void) {
   m->lt[0] = &layouts[0];
   m->lt[1] = &layouts[1 % LENGTH(layouts)];
   strncpy(m->ltsymbol, layouts[0].symbol, sizeof m->ltsymbol);
+  m->pertag = ecalloc(1, sizeof(Pertag));
+  m->pertag->curtag = m->pertag->prevtag = 1;
+
+  for (i = 0; i <= LENGTH(tags); i++) {
+    m->pertag->nmasters[i] = m->nmaster;
+    m->pertag->mfacts[i] = m->mfact;
+
+    m->pertag->ltidxs[i][0] = m->lt[0];
+    m->pertag->ltidxs[i][1] = m->lt[1];
+    m->pertag->sellts[i] = m->sellt;
+
+    m->pertag->showbars[i] = m->showbar;
+  }
+
   return m;
 }
 
@@ -1335,11 +1361,12 @@ void resizemouse(const Arg *arg) {
     or adding a new function for handling this.
   */
   if (strcmp(c->mon->ltsymbol, "[P]") == 0) {
-    if (!dynamiclttree) {
+    if (!selmon->pertag->dynamiclttree[selmon->pertag->curtag]) {
       debug_send_message("Layout tree is missing. Can't resize. ERROR");
       return;
     }
-    node = findclientintree(dynamiclttree, c);
+    node = findclientintree(
+        selmon->pertag->dynamiclttree[selmon->pertag->curtag], c);
     if (!node) {
       debug_send_message("Node does not exist in the current layout. ERROR");
       return;
@@ -1540,9 +1567,11 @@ void setfullscreen(Client *c, int fullscreen) {
 
 void setlayout(const Arg *arg) {
   if (!arg || !arg->v || arg->v != selmon->lt[selmon->sellt])
-    selmon->sellt ^= 1;
+    selmon->sellt = selmon->pertag->sellts[selmon->pertag->curtag] ^= 1;
   if (arg && arg->v)
-    selmon->lt[selmon->sellt] = (Layout *)arg->v;
+    selmon->lt[selmon->sellt] =
+        selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt] =
+            (Layout *)arg->v;
   strncpy(selmon->ltsymbol, selmon->lt[selmon->sellt]->symbol,
           sizeof selmon->ltsymbol);
   if (selmon->sel)
@@ -1560,7 +1589,7 @@ void setmfact(const Arg *arg) {
   f = arg->f < 1.0 ? arg->f + selmon->mfact : arg->f - 1.0;
   if (f < 0.05 || f > 0.95)
     return;
-  selmon->mfact = f;
+  selmon->mfact = selmon->pertag->mfacts[selmon->pertag->curtag] = f;
   arrange(selmon);
 }
 
@@ -1782,12 +1811,13 @@ TriangulationSide triangulate(int wx, int wy, int ww, int wh, int mx, int my) {
   TODO: Update child geometry if parent is a branch.
 */
 void removetilenode(Client *client) {
-  if (!dynamiclttree) {
+  if (!selmon->pertag->dynamiclttree[selmon->pertag->curtag]) {
     debug_send_message("Trying to remove a node from a nonexistent layout");
     return;
   }
 
-  TileNode *node = findclientintree(dynamiclttree, client);
+  TileNode *node = findclientintree(
+      selmon->pertag->dynamiclttree[selmon->pertag->curtag], client);
   if (!node) {
     debug_send_message("Client was not found in the layout tree.");
     return;
@@ -1796,7 +1826,7 @@ void removetilenode(Client *client) {
   /* This node is a root leaf, which means we can safely free it */
   if (!node->parent) {
     free(node);
-    dynamiclttree = NULL;
+    selmon->pertag->dynamiclttree[selmon->pertag->curtag] = NULL;
     return;
   }
   TileNode *parentnode = node->parent;
@@ -1820,7 +1850,7 @@ void removetilenode(Client *client) {
 
   if (!parentnode->parent) {
     free(parentnode);
-    dynamiclttree = survivor;
+    selmon->pertag->dynamiclttree[selmon->pertag->curtag] = survivor;
     return;
   }
 
@@ -1891,17 +1921,19 @@ void addtilenode(Client *client) {
   if (n == 0)
     return;
 
+  TileNode *root = selmon->pertag->dynamiclttree[selmon->pertag->curtag];
   if (n == 1) {
-    if (!dynamiclttree) {
-      dynamiclttree = malloc(sizeof(TileNode));
-      dynamiclttree->client = client;
-      dynamiclttree->fact = 0.5f;
-      dynamiclttree->x = client->mon->wx;
-      dynamiclttree->y = client->mon->wy;
-      dynamiclttree->w = client->mon->ww;
-      dynamiclttree->h = client->mon->wh;
-      dynamiclttree->childleft = NULL;
-      dynamiclttree->childright = NULL;
+    if (!root) {
+      root = malloc(sizeof(TileNode));
+      root->client = client;
+      root->fact = 0.5f;
+      root->x = client->mon->wx;
+      root->y = client->mon->wy;
+      root->w = client->mon->ww;
+      root->h = client->mon->wh;
+      root->childleft = NULL;
+      root->childright = NULL;
+      selmon->pertag->dynamiclttree[selmon->pertag->curtag] = root;
     }
 
     return;
@@ -1910,7 +1942,7 @@ void addtilenode(Client *client) {
   if (!getrootptr(&x, &y))
     return;
 
-  TileNode *node = findtile(dynamiclttree, x, y);
+  TileNode *node = findtile(root, x, y);
 
   if (!node) {
     debug_send_message("Unable to find the position for the client.");
@@ -2012,20 +2044,23 @@ void dynamictile(Monitor *m) {
   if (n == 0)
     return;
 
-  if (!dynamiclttree) {
-    dynamiclttree = malloc(sizeof(TileNode));
-    dynamiclttree->fact = 0.5f;
-    dynamiclttree->x = selmon->wx;
-    dynamiclttree->y = selmon->wy;
-    dynamiclttree->w = selmon->ww;
-    dynamiclttree->h = selmon->wh;
-    dynamiclttree->childleft = NULL;
-    dynamiclttree->childright = NULL;
+  TileNode *root = selmon->pertag->dynamiclttree[selmon->pertag->curtag];
+
+  if (!root) {
+    root = malloc(sizeof(TileNode));
+    root->fact = 0.5f;
+    root->x = selmon->wx;
+    root->y = selmon->wy;
+    root->w = selmon->ww;
+    root->h = selmon->wh;
+    root->childleft = NULL;
+    root->childright = NULL;
+    selmon->pertag->dynamiclttree[selmon->pertag->curtag] = root;
   }
 
   if (n == 1) {
-    dynamiclttree->client = nexttiled(m->clients);
-    recursiveresize(dynamiclttree);
+    root->client = nexttiled(m->clients);
+    recursiveresize(root);
     return;
   }
 
@@ -2040,7 +2075,7 @@ void dynamictile(Monitor *m) {
 
   // }
 
-  recursiveresize(dynamiclttree);
+  recursiveresize(root);
 }
 
 void recursiveresize(TileNode *node) {
@@ -2121,7 +2156,8 @@ void fibonacci(Monitor *m) {
 }
 
 void togglebar(const Arg *arg) {
-  selmon->showbar = !selmon->showbar;
+  selmon->showbar = selmon->pertag->showbars[selmon->pertag->curtag] =
+      !selmon->showbar;
   updatebarpos(selmon);
   XMoveResizeWindow(dpy, selmon->barwin, selmon->wx, selmon->by, selmon->ww,
                     bh);
@@ -2170,9 +2206,36 @@ void toggletag(const Arg *arg) {
 void toggleview(const Arg *arg) {
   unsigned int newtagset =
       selmon->tagset[selmon->seltags] ^ (arg->ui & TAGMASK);
+  int i;
 
   if (newtagset) {
     selmon->tagset[selmon->seltags] = newtagset;
+
+    if (newtagset == ~0) {
+      selmon->pertag->prevtag = selmon->pertag->curtag;
+      selmon->pertag->curtag = 0;
+    }
+
+    /* test if the user did not select the same tag */
+    if (!(newtagset & 1 << (selmon->pertag->curtag - 1))) {
+      selmon->pertag->prevtag = selmon->pertag->curtag;
+      for (i = 0; !(newtagset & 1 << i); i++)
+        ;
+      selmon->pertag->curtag = i + 1;
+    }
+
+    /* apply settings for this view */
+    selmon->nmaster = selmon->pertag->nmasters[selmon->pertag->curtag];
+    selmon->mfact = selmon->pertag->mfacts[selmon->pertag->curtag];
+    selmon->sellt = selmon->pertag->sellts[selmon->pertag->curtag];
+    selmon->lt[selmon->sellt] =
+        selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt];
+    selmon->lt[selmon->sellt ^ 1] =
+        selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt ^ 1];
+
+    if (selmon->showbar != selmon->pertag->showbars[selmon->pertag->curtag])
+      togglebar(NULL);
+
     focus(NULL);
     arrange(selmon);
   }
@@ -2458,11 +2521,40 @@ void updatewmhints(Client *c) {
 }
 
 void view(const Arg *arg) {
+  int i;
+  unsigned int tmptag;
+
   if ((arg->ui & TAGMASK) == selmon->tagset[selmon->seltags])
     return;
   selmon->seltags ^= 1; /* toggle sel tagset */
-  if (arg->ui & TAGMASK)
+  if (arg->ui & TAGMASK) {
     selmon->tagset[selmon->seltags] = arg->ui & TAGMASK;
+    selmon->pertag->prevtag = selmon->pertag->curtag;
+
+    if (arg->ui == ~0)
+      selmon->pertag->curtag = 0;
+    else {
+      for (i = 0; !(arg->ui & 1 << i); i++)
+        ;
+      selmon->pertag->curtag = i + 1;
+    }
+  } else {
+    tmptag = selmon->pertag->prevtag;
+    selmon->pertag->prevtag = selmon->pertag->curtag;
+    selmon->pertag->curtag = tmptag;
+  }
+
+  selmon->nmaster = selmon->pertag->nmasters[selmon->pertag->curtag];
+  selmon->mfact = selmon->pertag->mfacts[selmon->pertag->curtag];
+  selmon->sellt = selmon->pertag->sellts[selmon->pertag->curtag];
+  selmon->lt[selmon->sellt] =
+      selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt];
+  selmon->lt[selmon->sellt ^ 1] =
+      selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt ^ 1];
+
+  if (selmon->showbar != selmon->pertag->showbars[selmon->pertag->curtag])
+    togglebar(NULL);
+
   focus(NULL);
   arrange(selmon);
 }
