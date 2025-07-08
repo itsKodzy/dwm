@@ -1849,12 +1849,14 @@ void updatechild(TileNode *node) {
 
   if (node->hsplit) {
     node->childright->w = node->w - lw;
-    node->childright->x = node->x + node->childleft->w;
+    node->childright->x = node->x + lw;
     node->childright->y = node->y;
+    node->childright->h = node->h;
   } else {
-    node->childright->y = node->y + node->childleft->h;
+    node->childright->y = node->y + lh;
     node->childright->x = node->x;
     node->childright->h = node->h - lh;
+    node->childright->w = node->w;
   }
 
   updatechild(node->childleft);
