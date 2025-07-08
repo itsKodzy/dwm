@@ -298,6 +298,8 @@ static TileNode *recursivetilefinder(TileNode *node, int x, int y);
 static void recursiveresize(TileNode *node);
 static void updatechild(TileNode *node);
 
+TileNode *dynamiclttree;
+
 /* variables */
 static const char broken[] = "broken";
 static char stext[1024];
@@ -1321,11 +1323,28 @@ void resizemouse(const Arg *arg) {
   Monitor *m;
   XEvent ev;
   Time lasttime = 0;
+  TileNode *node;
 
   if (!(c = selmon->sel))
     return;
   if (c->isfullscreen) /* no support resizing fullscreen windows by mouse */
     return;
+
+  /*
+    TODO: enable changing of tile factor by either changing this
+    or adding a new function for handling this.
+  */
+  if (strcmp(c->mon->ltsymbol, "[P]") == 0) {
+    if (!dynamiclttree) {
+      debug_send_message("Layout tree is missing. Can't resize. ERROR");
+      return;
+    }
+    node = findclientintree(dynamiclttree, c);
+    if (!node) {
+      debug_send_message("Node does not exist in the current layout. ERROR");
+      return;
+    }
+  }
   restack(selmon);
   ocx = c->x;
   ocy = c->y;
@@ -1349,16 +1368,23 @@ void resizemouse(const Arg *arg) {
 
       nw = MAX(ev.xmotion.x - ocx - 2 * c->bw + 1, 1);
       nh = MAX(ev.xmotion.y - ocy - 2 * c->bw + 1, 1);
-      if (c->mon->wx + nw >= selmon->wx &&
-          c->mon->wx + nw <= selmon->wx + selmon->ww &&
-          c->mon->wy + nh >= selmon->wy &&
-          c->mon->wy + nh <= selmon->wy + selmon->wh) {
-        if (!c->isfloating && selmon->lt[selmon->sellt]->arrange &&
-            (abs(nw - c->w) > snap || abs(nh - c->h) > snap))
-          togglefloating(NULL);
+      if (!node) {
+        if (c->mon->wx + nw >= selmon->wx &&
+            c->mon->wx + nw <= selmon->wx + selmon->ww &&
+            c->mon->wy + nh >= selmon->wy &&
+            c->mon->wy + nh <= selmon->wy + selmon->wh) {
+          if (!c->isfloating && selmon->lt[selmon->sellt]->arrange &&
+              (abs(nw - c->w) > snap || abs(nh - c->h) > snap))
+            togglefloating(NULL);
+        }
+        if (!selmon->lt[selmon->sellt]->arrange || c->isfloating)
+          resize(c, c->x, c->y, nw, nh, 1);
+      } else {
+        if (!node->parent) {
+          debug_send_message("Can't change a factor of a single window.");
+          return;
+        }
       }
-      if (!selmon->lt[selmon->sellt]->arrange || c->isfloating)
-        resize(c, c->x, c->y, nw, nh, 1);
       break;
     }
   } while (ev.type != ButtonRelease);
@@ -1718,12 +1744,12 @@ void _triangulatewindowwrapper(const Arg *arg) {
   int x, y;
 
   if (!getrootptr(&x, &y)) {
-    debug_send_message("whoopsie");
+    debug_send_message("Unable to retrieve mouse position. ERROR.");
     return;
   }
 
   if (!(c = selmon->sel)) {
-    debug_send_message("Double whoopsie");
+    debug_send_message("No selected client present. ERROR");
     return;
   }
 
@@ -1733,16 +1759,9 @@ void _triangulatewindowwrapper(const Arg *arg) {
 TriangulationSide triangulate(int wx, int wy, int ww, int wh, int mx, int my) {
   int x = (mx - wx) * wh;
   int y = (my - wy) * ww;
-  char message[32];
 
   int is_above_main_diagonal = x > y;
   int is_above_alt_diagonal = !(x > (wh - (my - wy)) * ww);
-
-  snprintf(message, sizeof(message), "main: %d alt: %d", is_above_main_diagonal,
-           is_above_alt_diagonal);
-  debug_send_message(message);
-  snprintf(message, sizeof(message), "x: %d y: %d factor: %d", x, y);
-  debug_send_message(message);
 
   if (is_above_main_diagonal && is_above_alt_diagonal) {
     return TRIANGULATION_TOP;
@@ -1753,11 +1772,10 @@ TriangulationSide triangulate(int wx, int wy, int ww, int wh, int mx, int my) {
   } else if (!is_above_alt_diagonal && !is_above_main_diagonal) {
     return TRIANGULATION_BOTTOM;
   } else {
-    debug_send_message("HOLY MOLY, we hit the second tower (an edge case. "
-                       "Please report it to Kodzy)");
+    debug_send_message("Triangulation edge case. Contact Kodzy.");
     return TRIANGULATION_TOP;
   }
-};
+}
 
 /*
   This is becoming a literal comment hell =(
@@ -1770,28 +1788,25 @@ TriangulationSide triangulate(int wx, int wy, int ww, int wh, int mx, int my) {
   Oh, and we can store window areas as leafs.
 */
 
-TileNode *supercringelayout = NULL;
-
 /*
   TODO: Update child geometry if parent is a branch.
 */
 void removetilenode(Client *client) {
-  if (!supercringelayout) {
-    debug_send_message(
-        "maaaan, this sucks. It was not supposed to be shown to u ;(");
+  if (!dynamiclttree) {
+    debug_send_message("Trying to remove a node from a nonexistent layout");
     return;
   }
 
-  TileNode *node = findclientintree(supercringelayout, client);
+  TileNode *node = findclientintree(dynamiclttree, client);
   if (!node) {
-    debug_send_message("oof, that's really not good");
+    debug_send_message("Client was not found in the layout tree.");
     return;
   }
 
   /* This node is a root leaf, which means we can safely free it */
   if (!node->parent) {
     free(node);
-    supercringelayout = NULL;
+    dynamiclttree = NULL;
     return;
   }
   TileNode *parentnode = node->parent;
@@ -1815,7 +1830,7 @@ void removetilenode(Client *client) {
 
   if (!parentnode->parent) {
     free(parentnode);
-    supercringelayout = survivor;
+    dynamiclttree = survivor;
     return;
   }
 
@@ -1887,16 +1902,16 @@ void addtilenode(Client *client) {
     return;
 
   if (n == 1) {
-    if (!supercringelayout) {
-      supercringelayout = malloc(sizeof(TileNode));
-      supercringelayout->client = client;
-      supercringelayout->fact = 0.5f;
-      supercringelayout->x = client->mon->wx;
-      supercringelayout->y = client->mon->wy;
-      supercringelayout->w = client->mon->ww;
-      supercringelayout->h = client->mon->wh;
-      supercringelayout->childleft = NULL;
-      supercringelayout->childright = NULL;
+    if (!dynamiclttree) {
+      dynamiclttree = malloc(sizeof(TileNode));
+      dynamiclttree->client = client;
+      dynamiclttree->fact = 0.5f;
+      dynamiclttree->x = client->mon->wx;
+      dynamiclttree->y = client->mon->wy;
+      dynamiclttree->w = client->mon->ww;
+      dynamiclttree->h = client->mon->wh;
+      dynamiclttree->childleft = NULL;
+      dynamiclttree->childright = NULL;
     }
 
     return;
@@ -1905,10 +1920,11 @@ void addtilenode(Client *client) {
   if (!getrootptr(&x, &y))
     return;
 
-  TileNode *node = recursivetilefinder(supercringelayout, x, y);
+  TileNode *node = recursivetilefinder(dynamiclttree, x, y);
 
   if (!node) {
-    debug_send_message("wtf ;_;");
+    debug_send_message(
+        "Unable to find the position. Possibly, gaps in the layout tree");
     return;
   }
   TriangulationSide where =
@@ -1993,7 +2009,6 @@ void dynamictile(Monitor *m) {
   unsigned int i, n, h, mw, my, ty, nx, ny;
   my = ty = m->gappx;
   Client *c;
-  int is_arranged = 0;
 
   if (!getrootptr(&x, &y))
     return;
@@ -2003,38 +2018,45 @@ void dynamictile(Monitor *m) {
   if (n == 0)
     return;
 
-  if (!supercringelayout) {
-    supercringelayout = malloc(sizeof(TileNode));
-    supercringelayout->fact = 0.5f;
-    supercringelayout->x = selmon->wx;
-    supercringelayout->y = selmon->wy;
-    supercringelayout->w = selmon->ww;
-    supercringelayout->h = selmon->wh;
-    supercringelayout->childleft = NULL;
-    supercringelayout->childright = NULL;
+  if (!dynamiclttree) {
+    dynamiclttree = malloc(sizeof(TileNode));
+    dynamiclttree->fact = 0.5f;
+    dynamiclttree->x = selmon->wx;
+    dynamiclttree->y = selmon->wy;
+    dynamiclttree->w = selmon->ww;
+    dynamiclttree->h = selmon->wh;
+    dynamiclttree->childleft = NULL;
+    dynamiclttree->childright = NULL;
   }
 
   if (n == 1) {
-    supercringelayout->client = nexttiled(m->clients);
-    recursiveresize(supercringelayout);
+    dynamiclttree->client = nexttiled(m->clients);
+    recursiveresize(dynamiclttree);
     return;
   }
 
   /*
     It should be working now. Should just add reinitialization if we our layout
     is wrong.
+    Wait, it's working fine even without reinitialization?
+    Nah, it's not.
   */
   // int alternating = 0;
   // for (i = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next)) {
 
   // }
 
-  recursiveresize(supercringelayout);
+  recursiveresize(dynamiclttree);
 }
 
 void recursiveresize(TileNode *node) {
   if (node->client) {
-    resize(node->client, node->x, node->y, node->w, node->h, 0);
+    resize(node->client, node->x, node->y, node->w - node->client->bw * 2,
+           node->h - node->client->bw * 2, 0);
+    /* uncomment in case you want to have gaps */
+    // resize(node->client, node->x + m->gappx, node->y + m->gappx,
+    //        node->w - node->client->bw * 2 - m->gappx * 2,
+    //        node->h - node->client->bw * 2 - m->gappx * 2, 0);
     return;
   }
 
