@@ -1667,8 +1667,9 @@ void showhide(Client *c) {
   } else {
     /* hide clients bottom up */
     showhide(c->snext);
-    XMoveWindow(dpy, c->win, c->mon->wx + c->mon->ww / 2, -(HEIGHT(c) * 3) / 2);
-    // XMoveWindow(dpy, c->win, WIDTH(c) * -2, c->y);
+    // XMoveWindow(dpy, c->win, c->mon->wx + c->mon->ww / 2, -(HEIGHT(c) * 3) /
+    // 2);
+    XMoveWindow(dpy, c->win, WIDTH(c) * -2, c->y);
   }
 }
 
@@ -1912,8 +1913,12 @@ void addtilenode(Client *client) {
   TileNode *node = findtile(dynamiclttree, x, y);
 
   if (!node) {
-    debug_send_message(
-        "Unable to find the position. Possibly, gaps in the layout tree");
+    debug_send_message("Unable to find the position for the client.");
+
+    togglefloating(NULL);
+    resize(client, client->mon->mx + (client->mon->mw / 2 - WIDTH(client) / 2),
+           client->mon->my + (client->mon->mh / 2 - HEIGHT(client) / 2),
+           client->w, client->h, 0); /* center it */
     return;
   }
   TriangulationSide where =
@@ -2382,8 +2387,7 @@ void updatesizehints(Client *c) {
   } else
     c->maxw = c->maxh = 0;
 
-  /* Don't respect minimum geometry + make window floating if max size cannot
-   * fill the entire screen */
+  /* remove min size and add a floating check */
   c->isfloating = (size.flags & PMaxSize) && c->maxw < c->mon->mw;
   c->minw = c->minh = 0;
 
