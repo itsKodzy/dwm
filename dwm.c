@@ -2068,7 +2068,7 @@ void dynamictile(Monitor *m) {
 
 TileNode *createnode(Client *c, TileNode *parent) {
   TileNode *node = malloc(sizeof(TileNode));
-  node->fact = 0.5f;
+  node->fact = c->mon->mfact;
   node->childleft = NULL;
   node->childright = NULL;
 
