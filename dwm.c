@@ -64,8 +64,16 @@
 #define TEXTW(X) (drw_fontset_getwidth(drw, (X)) + lrpad)
 
 /* enums */
-enum { CurResizeBR, CurResizeBL, CurResizeTR, CurResizeTL, CurNormal, CurMove, CurLast }; /* cursor */
-enum { SchemeNorm, SchemeSel };                  /* color schemes */
+enum {
+  CurResizeBR,
+  CurResizeBL,
+  CurResizeTR,
+  CurResizeTL,
+  CurNormal,
+  CurMove,
+  CurLast
+};                              /* cursor */
+enum { SchemeNorm, SchemeSel }; /* color schemes */
 enum {
   NetSupported,
   NetWMName,
@@ -296,6 +304,7 @@ static void recursiveresize(TileNode *node);
 static void updatechild(TileNode *node);
 static TileNode *createnode(Client *c, TileNode *parent);
 static void resizenode(TileNode *node, int x, int y, int w, int h);
+static int usemousefocus = 1;
 
 /* variables */
 static const char broken[] = "broken";
@@ -872,6 +881,18 @@ void focus(Client *c) {
   if (!c || !ISVISIBLE(c))
     for (c = selmon->stack; c && !ISVISIBLE(c); c = c->snext)
       ;
+
+  if (usemousefocus) {
+    int x, y;
+
+    if (!getrootptr(&x, &y))
+      return;
+
+    for (c = selmon->stack;
+         c && (!ISVISIBLE(c) || !INTERSECTPOINT(c->x, c->y, c->w, c->h, x, y));
+         c = c->snext)
+      ;
+  }
   if (selmon->sel && selmon->sel != c)
     unfocus(selmon->sel, 0);
   if (c) {
@@ -1346,8 +1367,8 @@ void resizemouse(const Arg *arg) {
   Monitor *m;
   XEvent ev;
   int horizcorner, vertcorner;
-	unsigned int dui;
-	Window dummy;
+  unsigned int dui;
+  Window dummy;
   Time lasttime = 0;
   TileNode *node = NULL;
 
@@ -1376,13 +1397,14 @@ void resizemouse(const Arg *arg) {
   ocx = c->x;
   ocy = c->y;
   och = c->h;
-	ocw = c->w;
-	if (!XQueryPointer(dpy, c->win, &dummy, &dummy, &opx, &opy, &nx, &ny, &dui))
-		return;
-	horizcorner = nx < c->w / 2;
-	vertcorner  = ny < c->h / 2;
+  ocw = c->w;
+  if (!XQueryPointer(dpy, c->win, &dummy, &dummy, &opx, &opy, &nx, &ny, &dui))
+    return;
+  horizcorner = nx < c->w / 2;
+  vertcorner = ny < c->h / 2;
   if (XGrabPointer(dpy, root, False, MOUSEMASK, GrabModeAsync, GrabModeAsync,
-                   None, cursor[horizcorner | (vertcorner << 1)]->cursor, CurrentTime) != GrabSuccess)
+                   None, cursor[horizcorner | (vertcorner << 1)]->cursor,
+                   CurrentTime) != GrabSuccess)
     return;
   do {
     XMaskEvent(dpy, MOUSEMASK | ExposureMask | SubstructureRedirectMask, &ev);
@@ -1398,9 +1420,10 @@ void resizemouse(const Arg *arg) {
       lasttime = ev.xmotion.time;
 
       nx = horizcorner ? (ocx + ev.xmotion.x - opx) : c->x;
-			ny = vertcorner ? (ocy + ev.xmotion.y - opy) : c->y;
-			nw = MAX(horizcorner ? (ocx + ocw - nx) : (ocw + (ev.xmotion.x - opx)), 1);
-			nh = MAX(vertcorner ? (ocy + och - ny) : (och + (ev.xmotion.y - opy)), 1);
+      ny = vertcorner ? (ocy + ev.xmotion.y - opy) : c->y;
+      nw =
+          MAX(horizcorner ? (ocx + ocw - nx) : (ocw + (ev.xmotion.x - opx)), 1);
+      nh = MAX(vertcorner ? (ocy + och - ny) : (och + (ev.xmotion.y - opy)), 1);
       if (!node) {
         if (c->mon->wx + nw >= selmon->wx &&
             c->mon->wx + nw <= selmon->wx + selmon->ww &&
@@ -1414,13 +1437,14 @@ void resizemouse(const Arg *arg) {
           resizeclient(c, nx, ny, nw, nh);
       } else {
         if (!node->parent) {
-          debug_send_message("Can't change a factor of a single window. Expect spam");
+          debug_send_message(
+              "Can't change a factor of a single window. Expect spam");
           goto skip;
         }
 
         /* imagine that there is some cool code that changes factors. */
-        
-        skip:
+
+      skip:
       }
       break;
     }
@@ -1648,9 +1672,9 @@ void setup(void) {
   /* init cursors */
   cursor[CurNormal] = drw_cur_create(drw, XC_left_ptr);
   cursor[CurResizeBR] = drw_cur_create(drw, XC_bottom_right_corner);
-	cursor[CurResizeBL] = drw_cur_create(drw, XC_bottom_left_corner);
-	cursor[CurResizeTR] = drw_cur_create(drw, XC_top_right_corner);
-	cursor[CurResizeTL] = drw_cur_create(drw, XC_top_left_corner);
+  cursor[CurResizeBL] = drw_cur_create(drw, XC_bottom_left_corner);
+  cursor[CurResizeTR] = drw_cur_create(drw, XC_top_right_corner);
+  cursor[CurResizeTL] = drw_cur_create(drw, XC_top_left_corner);
   cursor[CurMove] = drw_cur_create(drw, XC_fleur);
   /* init appearance */
   scheme = ecalloc(LENGTH(colors) + 1, sizeof(Clr *));
@@ -2116,6 +2140,11 @@ void recursiveresize(TileNode *node) {
 
   recursiveresize(node->childleft);
   recursiveresize(node->childright);
+}
+
+void togglefocusmethod() {
+  debug_send_message(usemousefocus ? "Stack focus" : "Mouse focus");
+  usemousefocus = !usemousefocus;
 }
 
 void fibonacci(Monitor *m) {

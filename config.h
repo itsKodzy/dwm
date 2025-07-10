@@ -93,6 +93,7 @@ static const Key keys[] = {
 	{ MODKEY,                       XK_space,  spawn,           {.v = overlaycmd } },
 	{ ControlMask,                  XK_Print,  spawn,           {.v = xcolorcmd} },
  
+	{ MODKEY,                       XK_i,      togglefocusmethod,{0} },
 	{ MODKEY,                       XK_b,      togglebar,       {0} },
 	{ MODKEY,                       XK_h,      setmfact,        {.f = -0.05} },
 	{ MODKEY,                       XK_l,      setmfact,        {.f = +0.05} },
