@@ -31,15 +31,9 @@ static Rule rules[] = {
 	 *	WM_CLASS(STRING) = instance, class
 	 *	WM_NAME(STRING) = title
 	 */
-	/* class                instance    title      tags mask     isfloating   isterminal  noswallow  monitor */
-	{ "super_overlay",      NULL,       NULL,      0,                       0,          -1 }, // 1,           0,
-	{ "Alacritty",          NULL,       NULL,      0,                       0,          -1 }, // 0,           1,
+	/* class                instance    title      tags mask                isfloating  monitor */
 	{ "floorp",            	"Devtools", NULL,      0,                       1,          -1 }, // 1,           0,
-//	{ "floorp",         	"Navigator",NULL,      0,                       1,          0  }, // 0,           0,
-//	{ "Spotify",  			NULL,       NULL,      0,                       0,          2  }, // 0,           0,
 	{ "floorp",             "Toolkit",  NULL,      0,                       1,          -1 }, // 1,           0,
-	{ "TelegramDesktop",    NULL,       NULL,      0,                       0,          1 }, // 0,           0,
-	{ "AyuGramDesktop",    NULL,       NULL,      0,                       0,          1 }, // 0,           0,
 };
 
 

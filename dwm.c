@@ -268,12 +268,7 @@ static int xerrordummy(Display *dpy, XErrorEvent *ee);
 static int xerrorstart(Display *dpy, XErrorEvent *ee);
 static void zoom(const Arg *arg);
 
-typedef enum {
-  TRIANGULATION_TOP,
-  TRIANGULATION_RIGHT,
-  TRIANGULATION_BOTTOM,
-  TRIANGULATION_LEFT
-} TriangulationSide;
+typedef enum { TRIG_TOP, TRIG_RIGHT, TRIG_BOTTOM, TRIG_LEFT } TrigSide;
 
 typedef struct TileNode {
   int x, y, w, h;
@@ -292,13 +287,15 @@ static void debug_send_message(char message[]);
 static void dynamictile(Monitor *m);
 static void fibonacci(Monitor *m);
 static void _triangulatewindowwrapper(const Arg *arg);
-static TriangulationSide triangulate(int wx, int wy, int ww, int wh, int mx,
-                                     int my);
+static TrigSide triangulate(int wx, int wy, int ww, int wh, int mx, int my);
+static void removetilenode(Client *client);
 static void addtilenode(Client *client);
 static TileNode *findclientintree(TileNode *node, Client *client);
 static TileNode *findtile(TileNode *node, int x, int y);
 static void recursiveresize(TileNode *node);
 static void updatechild(TileNode *node);
+static TileNode *createnode(Client *c, TileNode *parent);
+static void resizenode(TileNode *node, int x, int y, int w, int h);
 
 /* variables */
 static const char broken[] = "broken";
@@ -458,9 +455,9 @@ int applysizehints(Client *c, int *x, int *y, int *w, int *h, int interact) {
 }
 
 void arrange(Monitor *m) {
-  if (m) {
+  if (m)
     showhide(m->stack);
-  } else
+  else
     for (m = mons; m; m = m->next)
       showhide(m->stack);
   if (m) {
@@ -1349,7 +1346,7 @@ void resizemouse(const Arg *arg) {
   Monitor *m;
   XEvent ev;
   Time lasttime = 0;
-  TileNode *node;
+  TileNode *node = NULL;
 
   if (!(c = selmon->sel))
     return;
@@ -1728,7 +1725,14 @@ void debug_send_message(char message[]) {
 
 void tag(const Arg *arg) {
   if (selmon->sel && arg->ui & TAGMASK) {
+    if (strcmp(selmon->ltsymbol, "[P]") == 0)
+      removetilenode(selmon->sel);
+
     selmon->sel->tags = arg->ui & TAGMASK;
+
+    if (strcmp(selmon->pertag->ltidxs[ffs(arg->ui)][0]->symbol, "[P]") == 0)
+      addtilenode(selmon->sel);
+
     focus(NULL);
     arrange(selmon);
   }
@@ -1786,24 +1790,21 @@ void _triangulatewindowwrapper(const Arg *arg) {
   triangulate(c->x, c->y, c->w, c->h, x, y);
 }
 
-TriangulationSide triangulate(int wx, int wy, int ww, int wh, int mx, int my) {
+TrigSide triangulate(int wx, int wy, int ww, int wh, int mx, int my) {
   int x = (mx - wx) * wh;
   int y = (my - wy) * ww;
 
-  int is_above_main_diagonal = x > y;
+  int is_above_main_diagonal = x >= y;
   int is_above_alt_diagonal = !(x > (wh - (my - wy)) * ww);
 
   if (is_above_main_diagonal && is_above_alt_diagonal) {
-    return TRIANGULATION_TOP;
+    return TRIG_TOP;
   } else if (is_above_main_diagonal && !is_above_alt_diagonal) {
-    return TRIANGULATION_RIGHT;
+    return TRIG_RIGHT;
   } else if (!is_above_main_diagonal && is_above_alt_diagonal) {
-    return TRIANGULATION_LEFT;
+    return TRIG_LEFT;
   } else if (!is_above_alt_diagonal && !is_above_main_diagonal) {
-    return TRIANGULATION_BOTTOM;
-  } else {
-    debug_send_message("Triangulation edge case. Contact Kodzy.");
-    return TRIANGULATION_TOP;
+    return TRIG_BOTTOM;
   }
 }
 
@@ -1811,13 +1812,13 @@ TriangulationSide triangulate(int wx, int wy, int ww, int wh, int mx, int my) {
   TODO: Update child geometry if parent is a branch.
 */
 void removetilenode(Client *client) {
-  if (!selmon->pertag->dynamiclttree[selmon->pertag->curtag]) {
+  TileNode *root = selmon->pertag->dynamiclttree[ffs(client->tags)];
+  if (!root) {
     debug_send_message("Trying to remove a node from a nonexistent layout");
     return;
   }
 
-  TileNode *node = findclientintree(
-      selmon->pertag->dynamiclttree[selmon->pertag->curtag], client);
+  TileNode *node = findclientintree(root, client);
   if (!node) {
     debug_send_message("Client was not found in the layout tree.");
     return;
@@ -1826,43 +1827,40 @@ void removetilenode(Client *client) {
   /* This node is a root leaf, which means we can safely free it */
   if (!node->parent) {
     free(node);
-    selmon->pertag->dynamiclttree[selmon->pertag->curtag] = NULL;
+    selmon->pertag->dynamiclttree[ffs(client->tags)] = NULL;
     return;
   }
-  TileNode *parentnode = node->parent;
+  TileNode *parent = node->parent;
 
   TileNode *survivor;
 
-  if (parentnode->childleft->client == client) {
-    survivor = parentnode->childright;
-    free(parentnode->childleft);
+  if (parent->childleft->client == client) {
+    survivor = parent->childright;
+    free(parent->childleft);
   } else {
-    survivor = parentnode->childleft;
-    free(parentnode->childright);
+    survivor = parent->childleft;
+    free(parent->childright);
   }
 
-  survivor->x = parentnode->x;
-  survivor->y = parentnode->y;
-  survivor->w = parentnode->w;
-  survivor->h = parentnode->h;
-  survivor->parent = NULL;
+  resizenode(survivor, parent->x, parent->y, parent->w, parent->h);
+
+  survivor->parent = parent->parent;
   updatechild(survivor);
 
-  if (!parentnode->parent) {
-    free(parentnode);
-    selmon->pertag->dynamiclttree[selmon->pertag->curtag] = survivor;
+  if (!parent->parent) {
+    free(parent);
+    selmon->pertag->dynamiclttree[ffs(client->tags)] = survivor;
     return;
   }
 
-  survivor->parent = parentnode->parent;
-  TileNode *grandparent = parentnode->parent;
-  if (grandparent->childleft == parentnode) {
+  TileNode *grandparent = parent->parent;
+  if (grandparent->childleft == parent) {
     grandparent->childleft = survivor;
   } else {
     grandparent->childright = survivor;
   }
 
-  free(parentnode);
+  free(parent);
 }
 
 void updatechild(TileNode *node) {
@@ -1873,26 +1871,13 @@ void updatechild(TileNode *node) {
 
   if (node->hsplit) {
     lw = node->w * node->fact;
+    resizenode(node->childright, node->x + lw, node->y, node->w - lw, node->h);
   } else {
     lh = node->h * node->fact;
+    resizenode(node->childright, node->x, node->y + lh, node->w, node->h - lh);
   }
 
-  node->childleft->x = node->x;
-  node->childleft->y = node->y;
-  node->childleft->w = lw;
-  node->childleft->h = lh;
-
-  if (node->hsplit) {
-    node->childright->w = node->w - lw;
-    node->childright->x = node->x + lw;
-    node->childright->y = node->y;
-    node->childright->h = node->h;
-  } else {
-    node->childright->y = node->y + lh;
-    node->childright->x = node->x;
-    node->childright->h = node->h - lh;
-    node->childright->w = node->w;
-  }
+  resizenode(node->childleft, node->x, node->y, lw, lh);
 
   updatechild(node->childleft);
   updatechild(node->childright);
@@ -1912,30 +1897,21 @@ TileNode *findclientintree(TileNode *node, Client *client) {
 }
 
 void addtilenode(Client *client) {
-  int n;
   int x, y;
-  Client *c;
-  for (n = 0, c = nexttiled(client->mon->clients); c;
-       c = nexttiled(c->next), n++)
-    ;
-  if (n == 0)
+
+  TileNode *root = client->mon->pertag->dynamiclttree[ffs(client->tags)];
+
+  if (root && findclientintree(root, client)) {
+    debug_send_message("Client already exists in the layout.");
     return;
+  }
 
-  TileNode *root = selmon->pertag->dynamiclttree[selmon->pertag->curtag];
-  if (n == 1) {
-    if (!root) {
-      root = malloc(sizeof(TileNode));
-      root->client = client;
-      root->fact = 0.5f;
-      root->x = client->mon->wx;
-      root->y = client->mon->wy;
-      root->w = client->mon->ww;
-      root->h = client->mon->wh;
-      root->childleft = NULL;
-      root->childright = NULL;
-      selmon->pertag->dynamiclttree[selmon->pertag->curtag] = root;
-    }
-
+  if (!root) {
+    root = createnode(client, NULL);
+    resizenode(root, client->mon->wx, client->mon->wy, client->mon->ww,
+               client->mon->wh);
+    client->mon->pertag->dynamiclttree[ffs(client->tags)] = root;
+    debug_send_message("no root was present. addtilenode()");
     return;
   }
 
@@ -1948,51 +1924,45 @@ void addtilenode(Client *client) {
     debug_send_message("Unable to find the position for the client.");
 
     togglefloating(NULL);
-    resize(client, client->mon->mx + (client->mon->mw / 2 - WIDTH(client) / 2),
-           client->mon->my + (client->mon->mh / 2 - HEIGHT(client) / 2),
-           client->w, client->h, 0); /* center it */
+    int x = client->mon->mx + (client->mon->mw - WIDTH(client)) / 2;
+    int y = client->mon->my + (client->mon->mh - HEIGHT(client)) / 2;
+    resize(client, x, y, client->w, client->h, 0); /* center it */
     return;
   }
-  TriangulationSide where =
-      triangulate(node->x, node->y, node->w, node->h, x, y);
+  TrigSide where = triangulate(node->x, node->y, node->w, node->h, x, y);
 
-  TileNode *shiftnode = malloc(sizeof(TileNode));
-  TileNode *newnode = malloc(sizeof(TileNode));
+  TileNode *shiftnode = createnode(node->client, node);
+  resizenode(shiftnode, node->x, node->y, node->w, node->h);
 
-  shiftnode->fact = newnode->fact = 0.5, shiftnode->client = node->client,
-  shiftnode->x = newnode->x = node->x, shiftnode->y = newnode->y = node->y,
-  shiftnode->w = newnode->w = node->w, shiftnode->h = newnode->h = node->h;
-  shiftnode->childleft = shiftnode->childright = newnode->childleft =
-      newnode->childright = NULL;
-  newnode->client = client;
-
-  shiftnode->parent = newnode->parent = node;
+  TileNode *newnode = createnode(client, node);
+  resizenode(newnode, node->x, node->y, node->w, node->h);
 
   node->client = NULL;
 
-  if (where == TRIANGULATION_BOTTOM) {
+  /* this needs to be simplified / reworked */
+  if (where == TRIG_BOTTOM) {
     node->hsplit = 0;
     shiftnode->h *= node->fact;
     newnode->h *= 1.f - node->fact;
     newnode->y += shiftnode->h;
-  } else if (where == TRIANGULATION_LEFT) {
+  } else if (where == TRIG_LEFT) {
     node->hsplit = 1;
     shiftnode->w *= 1.f - node->fact;
     newnode->w *= node->fact;
     shiftnode->x += newnode->w;
-  } else if (where == TRIANGULATION_RIGHT) {
+  } else if (where == TRIG_RIGHT) {
     node->hsplit = 1;
     shiftnode->w *= node->fact;
     newnode->w *= 1.f - node->fact;
     newnode->x += shiftnode->w;
-  } else if (where == TRIANGULATION_TOP) {
+  } else if (where == TRIG_TOP) {
     node->hsplit = 0;
     shiftnode->h *= 1.f - node->fact;
     newnode->h *= node->fact;
     shiftnode->y += newnode->h;
   }
 
-  if (where == TRIANGULATION_BOTTOM || where == TRIANGULATION_RIGHT) {
+  if (where == TRIG_BOTTOM || where == TRIG_RIGHT) {
     node->childleft = shiftnode;
     node->childright = newnode;
   } else {
@@ -2035,6 +2005,7 @@ void dynamictile(Monitor *m) {
   unsigned int i, n, h, mw, my, ty, nx, ny;
   my = ty = m->gappx;
   Client *c;
+  int is_init = 1;
 
   if (!getrootptr(&x, &y))
     return;
@@ -2047,14 +2018,9 @@ void dynamictile(Monitor *m) {
   TileNode *root = selmon->pertag->dynamiclttree[selmon->pertag->curtag];
 
   if (!root) {
-    root = malloc(sizeof(TileNode));
-    root->fact = 0.5f;
-    root->x = selmon->wx;
-    root->y = selmon->wy;
-    root->w = selmon->ww;
-    root->h = selmon->wh;
-    root->childleft = NULL;
-    root->childright = NULL;
+    is_init = 0;
+    root = createnode(NULL, NULL);
+    resizenode(root, selmon->wx, selmon->wy, selmon->ww, selmon->wh);
     selmon->pertag->dynamiclttree[selmon->pertag->curtag] = root;
   }
 
@@ -2064,28 +2030,74 @@ void dynamictile(Monitor *m) {
     return;
   }
 
-  /*
-    It should be working now. Should just add reinitialization if we our layout
-    is wrong.
-    Wait, it's working fine even without reinitialization?
-    Nah, it's not.
-  */
-  // int alternating = 0;
-  // for (i = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next)) {
+  if (!is_init && n != 1) {
+    TileNode *node = root;
+    for (i = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), i++) {
+      if (node->client) {
+        int nodew = node->w;
+        int nodeh = node->h;
+        int x = node->x;
+        int y = node->y;
 
-  // }
+        if ((i % 2) == 0) {
+          nodew *= node->fact;
+          x += nodew;
+        } else {
+          nodeh *= node->fact;
+          y += nodeh;
+        }
 
+        TileNode *childleft = createnode(node->client, node);
+        resizenode(childleft, node->x, node->y, node->w, node->h);
+
+        TileNode *childright = createnode(c, node);
+        resizenode(childright, x, y, nodew, nodeh);
+
+        node->client = NULL;
+        node->childleft = childleft;
+        node->childright = childright;
+
+        node = childright;
+      } else {
+        node->client = c;
+      }
+    }
+  }
   recursiveresize(root);
+}
+
+TileNode *createnode(Client *c, TileNode *parent) {
+  TileNode *node = malloc(sizeof(TileNode));
+  node->fact = 0.5f;
+  node->childleft = NULL;
+  node->childright = NULL;
+
+  node->client = c;
+  node->parent = parent;
+
+  return node;
+}
+
+void resizenode(TileNode *node, int x, int y, int w, int h) {
+  node->x = x;
+  node->y = y;
+  node->w = w;
+  node->h = h;
 }
 
 void recursiveresize(TileNode *node) {
   if (node->client) {
-    resize(node->client, node->x, node->y, node->w - node->client->bw * 2,
-           node->h - node->client->bw * 2, 0);
-    /* uncomment in case you want to have gaps */
-    // resize(node->client, node->x + m->gappx, node->y + m->gappx,
-    //        node->w - node->client->bw * 2 - m->gappx * 2,
-    //        node->h - node->client->bw * 2 - m->gappx * 2, 0);
+    /* uncomment if you want to have gaps */
+    // int x = node->x + node->client->mon->gappx;
+    // int y = node->y + node->client->mon->gappx;
+    // int w = node->w - node->client->bw * 2 - node->client->mon->gappx * 2;
+    // int h = node->h - node->client->bw * 2 - node->client->mon->gappx * 2;
+    int x = node->x;
+    int y = node->y;
+    int w = node->w - node->client->bw * 2;
+    int h = node->h - node->client->bw * 2;
+    resize(node->client, x, y, w, h, 0);
+
     return;
   }
 
@@ -2170,14 +2182,14 @@ void togglefloating(const Arg *arg) {
   if (selmon->sel->isfullscreen) /* no support for fullscreen windows */
     return;
   selmon->sel->isfloating = !selmon->sel->isfloating || selmon->sel->isfixed;
-  if (selmon->sel->isfloating) {
+  if (selmon->sel->isfloating)
     resize(selmon->sel, selmon->sel->x, selmon->sel->y, selmon->sel->w,
            selmon->sel->h, 0);
 
-    if (strcmp(selmon->ltsymbol, "[P]") == 0)
+  if (strcmp(selmon->ltsymbol, "[P]") == 0) {
+    if (selmon->sel->isfloating)
       removetilenode(selmon->sel);
-  } else {
-    if (strcmp(selmon->ltsymbol, "[P]") == 0)
+    else
       addtilenode(selmon->sel);
   }
 
@@ -2447,12 +2459,12 @@ void updatesizehints(Client *c) {
   if (size.flags & PMaxSize) {
     c->maxw = size.max_width;
     c->maxh = size.max_height;
+    c->isfloating = c->maxw < c->mon->ww - (gappx * 2) ||
+                    c->maxh < c->mon->wh - (gappx * 2);
   } else
     c->maxw = c->maxh = 0;
 
-  /* remove min size and add a floating check */
-  c->isfloating = (size.flags & PMaxSize) && c->maxw < c->mon->mw;
-  c->minw = c->minh = 0;
+  c->minw = c->minh = 1;
 
   if (size.flags & PAspect) {
     c->mina = (float)size.min_aspect.y / size.min_aspect.x;
