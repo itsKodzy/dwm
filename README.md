@@ -1,3 +1,9 @@
+# Kodzy's build
+auto-floating if window can't fill the screen space.
+
+Dynamic tiling layout. Basically the best tiling layout there is. 
+\(Curretly WIP, usage is not advised\)
+
 dwm - dynamic window manager
 ============================
 dwm is an extremely fast, small, and dynamic window manager for X.
