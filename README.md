@@ -1,7 +1,10 @@
 # Kodzy's build
 Patches:
  - auto-floating if window can't fill the screen space.
- - Dynamic tiling layout. Basically the best tiling layout there is. 
+ - Dynamic tiling layout. Basically the best tiling layout there is.
+ - pertag
+ - statuscmd
+ - status2d
 
 dwm - dynamic window manager
 ============================
