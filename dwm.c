@@ -1438,10 +1438,14 @@ void resizemouse(const Arg *arg) {
         if (!selmon->lt[selmon->sellt]->arrange || c->isfloating)
           resizeclient(c, nx, ny, nw, nh);
       } else {
+        if (c->isfloating) {
+          resizeclient(c, nx, ny, nw, nh);
+          break;
+        }
         if (!node->parent) {
           debug_send_message(
               "Can't change a factor of a single window. Expect spam");
-          goto skip;
+          break;
         }
 
         TileNode *parent = node->parent;
@@ -1474,7 +1478,6 @@ void resizemouse(const Arg *arg) {
 
         oldx = ev.xmotion.x;
         oldy = ev.xmotion.y;
-      skip:
       }
       break;
     }
