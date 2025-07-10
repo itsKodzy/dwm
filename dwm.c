@@ -1400,9 +1400,10 @@ void resizemouse(const Arg *arg) {
   och = c->h;
   ocw = c->w;
   if (!XQueryPointer(dpy, c->win, &dummy, &dummy, &opx, &opy, &nx, &ny, &dui))
-    return;
+  return;
   horizcorner = nx < c->w / 2;
   vertcorner = ny < c->h / 2;
+  int oldx = opx, oldy = opy;
   if (XGrabPointer(dpy, root, False, MOUSEMASK, GrabModeAsync, GrabModeAsync,
                    None, cursor[horizcorner | (vertcorner << 1)]->cursor,
                    CurrentTime) != GrabSuccess)
@@ -1443,7 +1444,20 @@ void resizemouse(const Arg *arg) {
           goto skip;
         }
 
-        /* imagine that there is some cool code that changes factors. */
+        TileNode *parent = node->parent;
+        float nfact = 0;
+
+        if (parent->hsplit)
+          nfact = (float)(ev.xmotion.x - oldx) / parent->w;
+        else
+          nfact = (float)(ev.xmotion.y - oldy) / parent->h;
+
+        oldx = ev.xmotion.x;
+        oldy = ev.xmotion.y;
+
+        parent->fact = MAX(MIN(nfact + parent->fact, maxfact), minfact);
+        updatechild(parent);
+        recursiveresize(parent);
 
       skip:
       }
@@ -2106,7 +2120,7 @@ void dynamictile(Monitor *m) {
 
 TileNode *createnode(Client *c, TileNode *parent) {
   TileNode *node = malloc(sizeof(TileNode));
-  node->fact = c->mon->mfact;
+  node->fact = c ? c->mon->mfact : 0.5f;
   node->childleft = NULL;
   node->childright = NULL;
 
