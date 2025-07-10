@@ -72,7 +72,7 @@ enum {
   CurNormal,
   CurMove,
   CurLast
-};                              /* cursor */
+}; /* cursor */
 enum { SchemeNorm, SchemeSel }; /* color schemes */
 enum {
   NetSupported,
@@ -304,6 +304,7 @@ static void recursiveresize(TileNode *node);
 static void updatechild(TileNode *node);
 static TileNode *createnode(Client *c, TileNode *parent);
 static void resizenode(TileNode *node, int x, int y, int w, int h);
+static void togglefocusmethod();
 static int usemousefocus = 1;
 
 /* variables */
