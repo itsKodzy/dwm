@@ -1419,7 +1419,7 @@ void resizemouse(const Arg *arg) {
         }
 
         /* imagine that there is some cool code that changes factors. */
-
+        
         skip:
       }
       break;
@@ -2028,13 +2028,13 @@ void dynamictile(Monitor *m) {
   if (n == 0)
     return;
 
-  TileNode *root = selmon->pertag->dynamiclttree[selmon->pertag->curtag];
+  TileNode *root = m->pertag->dynamiclttree[m->pertag->curtag];
 
   if (!root) {
     is_init = 0;
     root = createnode(NULL, NULL);
-    resizenode(root, selmon->wx, selmon->wy, selmon->ww, selmon->wh);
-    selmon->pertag->dynamiclttree[selmon->pertag->curtag] = root;
+    resizenode(root, m->wx, m->wy, m->ww, m->wh);
+    m->pertag->dynamiclttree[m->pertag->curtag] = root;
   }
 
   if (n == 1) {
