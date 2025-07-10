@@ -305,7 +305,7 @@ static void updatechild(TileNode *node);
 static TileNode *createnode(Client *c, TileNode *parent);
 static void resizenode(TileNode *node, int x, int y, int w, int h);
 static void togglefocusmethod();
-static int usemousefocus = 1;
+static int usemousefocus = 0;
 
 /* variables */
 static const char broken[] = "broken";
