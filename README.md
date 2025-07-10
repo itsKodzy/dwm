@@ -1,8 +1,7 @@
 # Kodzy's build
-auto-floating if window can't fill the screen space.
-
-Dynamic tiling layout. Basically the best tiling layout there is. 
-\(Curretly WIP, usage is not advised\)
+Patches:
+ - auto-floating if window can't fill the screen space.
+ - Dynamic tiling layout. Basically the best tiling layout there is. 
 
 dwm - dynamic window manager
 ============================
