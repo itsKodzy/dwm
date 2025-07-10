@@ -1142,7 +1142,7 @@ void manage(Window w, XWindowAttributes *wa) {
     unfocus(selmon->sel, 0);
   c->mon->sel = c;
 
-  if (strcmp(c->mon->ltsymbol, "[P]") == 0)
+  if (strcmp(c->mon->ltsymbol, "[P]") == 0 && !c->isfloating)
     addtilenode(c);
 
   arrange(c->mon);
@@ -1812,7 +1812,7 @@ TrigSide triangulate(int wx, int wy, int ww, int wh, int mx, int my) {
   TODO: Update child geometry if parent is a branch.
 */
 void removetilenode(Client *client) {
-  TileNode *root = selmon->pertag->dynamiclttree[ffs(client->tags)];
+  TileNode *root = client->mon->pertag->dynamiclttree[ffs(client->tags)];
   if (!root) {
     debug_send_message("Trying to remove a node from a nonexistent layout");
     return;
@@ -1827,7 +1827,7 @@ void removetilenode(Client *client) {
   /* This node is a root leaf, which means we can safely free it */
   if (!node->parent) {
     free(node);
-    selmon->pertag->dynamiclttree[ffs(client->tags)] = NULL;
+    client->mon->pertag->dynamiclttree[ffs(client->tags)] = NULL;
     return;
   }
   TileNode *parent = node->parent;
@@ -1849,7 +1849,7 @@ void removetilenode(Client *client) {
 
   if (!parent->parent) {
     free(parent);
-    selmon->pertag->dynamiclttree[ffs(client->tags)] = survivor;
+    client->mon->pertag->dynamiclttree[ffs(client->tags)] = survivor;
     return;
   }
 
@@ -2267,6 +2267,9 @@ void unfocus(Client *c, int setfocus) {
 void unmanage(Client *c, int destroyed) {
   Monitor *m = c->mon;
   XWindowChanges wc;
+  
+  if (strcmp(c->mon->ltsymbol, "[P]") == 0)
+    removetilenode(c);
 
   detach(c);
   detachstack(c);
@@ -2282,9 +2285,6 @@ void unmanage(Client *c, int destroyed) {
     XSetErrorHandler(xerror);
     XUngrabServer(dpy);
   }
-
-  if (strcmp(c->mon->ltsymbol, "[P]") == 0)
-    removetilenode(c);
 
   free(c);
   arrange(m);
