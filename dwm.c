@@ -1400,7 +1400,7 @@ void resizemouse(const Arg *arg) {
   och = c->h;
   ocw = c->w;
   if (!XQueryPointer(dpy, c->win, &dummy, &dummy, &opx, &opy, &nx, &ny, &dui))
-  return;
+    return;
   horizcorner = nx < c->w / 2;
   vertcorner = ny < c->h / 2;
   int oldx = opx, oldy = opy;
@@ -1452,13 +1452,28 @@ void resizemouse(const Arg *arg) {
         else
           nfact = (float)(ev.xmotion.y - oldy) / parent->h;
 
-        oldx = ev.xmotion.x;
-        oldy = ev.xmotion.y;
+        TileNode *nparent = parent->parent;
+        for (; nparent && nparent->hsplit == parent->hsplit;
+             nparent = nparent->parent)
+          ;
+
+        if (nparent) {
+          float nnfact = 0;
+          if (nparent->hsplit)
+            nnfact = (float)(ev.xmotion.x - oldx) / nparent->w;
+          else
+            nnfact = (float)(ev.xmotion.y - oldy) / nparent->h;
+          nparent->fact = MAX(MIN(nnfact + nparent->fact, maxfact), minfact);
+          updatechild(nparent);
+          recursiveresize(nparent);
+        }
 
         parent->fact = MAX(MIN(nfact + parent->fact, maxfact), minfact);
         updatechild(parent);
         recursiveresize(parent);
 
+        oldx = ev.xmotion.x;
+        oldy = ev.xmotion.y;
       skip:
       }
       break;
