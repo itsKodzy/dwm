@@ -5,6 +5,7 @@ Patches:
  - pertag
  - statuscmd
  - status2d
+ - resizepoint
 
 dwm - dynamic window manager
 ============================
