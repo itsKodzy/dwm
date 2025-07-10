@@ -7,6 +7,13 @@ Patches:
  - status2d
  - resizepoint
 
+# New Layout Showcase
+
+
+https://github.com/user-attachments/assets/0c7e100b-37fd-4f1d-84be-88208a6d9700
+
+
+
 dwm - dynamic window manager
 ============================
 dwm is an extremely fast, small, and dynamic window manager for X.
