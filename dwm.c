@@ -2036,6 +2036,11 @@ void addtilenode(Client *client) {
 
   TileNode *root = client->mon->pertag->dynamiclttree[ffs(client->tags)];
 
+  if (client->isfloating) {
+    debug_send_message("Cannot add a floating window to the layout");
+    return;
+  }
+
   if (root && findclientintree(root, client)) {
     debug_send_message("Client already exists in the layout.");
     return;
