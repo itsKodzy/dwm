@@ -305,7 +305,7 @@ static void updatechild(TileNode *node);
 static TileNode *createnode(Client *c, TileNode *parent);
 static void resizenode(TileNode *node, int x, int y, int w, int h);
 static void togglefocusmethod();
-static int usemousefocus = 1;
+static int usemousefocus = 0;
 
 /* variables */
 static const char broken[] = "broken";
@@ -889,7 +889,7 @@ void focus(Client *c) {
     if (!getrootptr(&x, &y))
       return;
 
-    for (c = selmon->clients;
+    for (c = selmon->stack;
          c && (!ISVISIBLE(c) || !INTERSECTPOINT(c->x, c->y, c->w + c->bw * 2, c->h + c->bw * 2, x, y));
          c = c->snext)
       ;
