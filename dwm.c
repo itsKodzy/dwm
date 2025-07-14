@@ -305,7 +305,7 @@ static void updatechild(TileNode *node);
 static TileNode *createnode(Client *c, TileNode *parent);
 static void resizenode(TileNode *node, int x, int y, int w, int h);
 static void togglefocusmethod();
-static int usemousefocus = 0;
+static int usemousefocus = 1;
 
 /* variables */
 static const char broken[] = "broken";
@@ -890,7 +890,7 @@ void focus(Client *c) {
       return;
 
     for (c = selmon->stack;
-         c && (!ISVISIBLE(c) || !INTERSECTPOINT(c->x, c->y, c->w, c->h, x, y));
+         c && (!ISVISIBLE(c) || !INTERSECTPOINT(c->x, c->y, c->w + c->bw * 2, c->h + c->bw * 2, x, y));
          c = c->snext)
       ;
   }
@@ -1378,10 +1378,6 @@ void resizemouse(const Arg *arg) {
   if (c->isfullscreen) /* no support resizing fullscreen windows by mouse */
     return;
 
-  /*
-    TODO: enable changing of tile factor by either changing this
-    or adding a new function for handling this.
-  */
   if (strcmp(c->mon->ltsymbol, "[P]") == 0 && !c->isfloating) {
     if (!selmon->pertag->dynamiclttree[selmon->pertag->curtag]) {
       debug_send_message("Layout tree is missing. Can't resize. ERROR");
@@ -1878,9 +1874,6 @@ TrigSide triangulate(int wx, int wy, int ww, int wh, int mx, int my) {
   }
 }
 
-/*
-  TODO: Update child geometry if parent is a branch.
-*/
 void removetilenode(Client *client) {
   TileNode *root = client->mon->pertag->dynamiclttree[ffs(client->tags)];
   if (!root) {
@@ -1894,12 +1887,12 @@ void removetilenode(Client *client) {
     return;
   }
 
-  /* This node is a root leaf, which means we can safely free it */
   if (!node->parent) {
     free(node);
     client->mon->pertag->dynamiclttree[ffs(client->tags)] = NULL;
     return;
   }
+
   TileNode *parent = node->parent;
 
   TileNode *survivor;
