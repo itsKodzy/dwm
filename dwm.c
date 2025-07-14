@@ -889,7 +889,7 @@ void focus(Client *c) {
     if (!getrootptr(&x, &y))
       return;
 
-    for (c = selmon->stack;
+    for (c = selmon->clients;
          c && (!ISVISIBLE(c) || !INTERSECTPOINT(c->x, c->y, c->w + c->bw * 2, c->h + c->bw * 2, x, y));
          c = c->snext)
       ;
