@@ -31,9 +31,10 @@ static Rule rules[] = {
 	 *	WM_CLASS(STRING) = instance, class
 	 *	WM_NAME(STRING) = title
 	 */
-	/* class                instance    title      tags mask                isfloating  monitor */
-	{ "floorp",            	"Devtools", NULL,      0,                       1,          -1 }, // 1,           0,
-	{ "floorp",             "Toolkit",  NULL,      0,                       1,          -1 }, // 1,           0,
+	/* class                instance    title      tags mask     isfloating   isterminal  noswallow  monitor */
+	{ "Alacritty",          NULL,       NULL,      0,            0,           1,          0,         -1 }, 
+	{ "floorp",            	"Devtools", NULL,      0,            1,           0,          0,         -1 }, 
+	{ "floorp",             "Toolkit",  NULL,      0,            1,           0,          0,         -1 }, 
 };
 
 
